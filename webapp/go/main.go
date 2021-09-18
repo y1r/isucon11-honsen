@@ -122,15 +122,17 @@ func (h *handlers) Initialize(c echo.Context) error {
 		return c.NoContent(http.StatusInternalServerError)
 	}
 	for _, user := range users {
-		// サンプルSQLでは、履修者がいる講義でクローズされたものがないため、すべて0で初期化でOK
-		query = `
-			INSERT INTO gpas(user_id, credits, total_scores) VALUES(
-				?, ?, ?
-			)
-		`
-		if _, err := h.DB.Exec(query, user.ID, 0, 0); err != nil {
-			c.Logger().Error(err)
-			return c.NoContent(http.StatusInternalServerError)
+		if user.Type == Student {
+			// サンプルSQLでは、履修者がいる講義でクローズされたものがないため、すべて0で初期化でOK
+			query = `
+				INSERT INTO gpas(user_id, credits, total_scores) VALUES(
+					?, ?, ?
+				)
+			`
+			if _, err := h.DB.Exec(query, user.ID, 0, 0); err != nil {
+				c.Logger().Error(err)
+				return c.NoContent(http.StatusInternalServerError)
+			}
 		}
 	}
 
