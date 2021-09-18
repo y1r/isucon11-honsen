@@ -1314,7 +1314,7 @@ func (h *handlers) GetAnnouncementList(c echo.Context) error {
 		" FROM `announcements`" +
 		" JOIN `courses` ON `announcements`.`course_id` = `courses`.`id`" +
 		" JOIN `registrations` ON `courses`.`id` = `registrations`.`course_id`" +
-		" LEFT JOIN `unread_announcements` ON `announcements`.`id` = `unread_announcements`.`announcement_id`" +
+		" LEFT JOIN `unread_announcements` ON `announcements`.`id` = `unread_announcements`.`announcement_id` AND `unread_announcements`.`user_id` = `registrations`.`user_id` " +
 		" WHERE 1=1"
 
 	if courseID := c.QueryParam("course_id"); courseID != "" {
@@ -1496,7 +1496,7 @@ func (h *handlers) GetAnnouncementDetail(c echo.Context) error {
 		" FROM `announcements`" +
 		" JOIN `courses` ON `courses`.`id` = `announcements`.`course_id`" +
 		" JOIN `registrations` ON `courses`.`id` = `registrations`.`course_id` " +
-		" LEFT JOIN `unread_announcements` ON `announcements`.`id` = `unread_announcements`.`announcement_id`" +
+		" LEFT JOIN `unread_announcements` ON `announcements`.`id` = `unread_announcements`.`announcement_id` AND `unread_announcements`.`user_id` = `registrations`.`user_id` " +
 		" WHERE `announcements`.`id` = ?" +
 		" AND `registrations`.`user_id` = ?"
 
