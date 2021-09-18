@@ -1,11 +1,11 @@
 -- CREATEと逆順
+DROP TABLE IF EXISTS `gpas`;
 DROP TABLE IF EXISTS `unread_announcements`;
 DROP TABLE IF EXISTS `announcements`;
 DROP TABLE IF EXISTS `submissions`;
 DROP TABLE IF EXISTS `classes`;
 DROP TABLE IF EXISTS `registrations`;
 DROP TABLE IF EXISTS `courses`;
-DROP TABLE IF EXISTS `gpas`;
 DROP TABLE IF EXISTS `users`;
 
 -- master data
