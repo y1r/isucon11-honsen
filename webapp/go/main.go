@@ -37,6 +37,7 @@ type handlers struct {
 }
 
 var rds *redis.Client
+
 func main() {
 	http.DefaultTransport.(*http.Transport).MaxIdleConnsPerHost = 1000
 
@@ -90,9 +91,9 @@ func main() {
 	}
 
 	rds = redis.NewClient(&redis.Options{
-		Addr: GetEnv("REDIS_ADDRPORT", "localhost:6379"),
+		Addr:     GetEnv("REDIS_ADDRPORT", "localhost:6379"),
 		Password: "",
-		DB: 0,
+		DB:       0,
 	})
 
 	e.Logger.Error(e.StartServer(e.Server))
@@ -1009,7 +1010,7 @@ func (h *handlers) SetCourseStatus(c echo.Context) error {
 				AND submissions.user_id = users.id
 			GROUP BY users.id
 		`
-		if err := tx.Select(&targets, query); err != nil {
+		if err := tx.Select(&targets, query, courseID); err != nil {
 			c.Logger().Error(err)
 			return c.NoContent(http.StatusInternalServerError)
 		}
@@ -1570,7 +1571,7 @@ func (h *handlers) AddAnnouncement(c echo.Context) error {
 
 type UnreadAnnouncement struct {
 	AnnouncementID string `db:"announcement_id"`
-	UserID string `db:"user_id"`
+	UserID         string `db:"user_id"`
 }
 
 type AnnouncementDetail struct {
