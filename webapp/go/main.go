@@ -22,6 +22,7 @@ import (
 	"github.com/labstack/echo-contrib/session"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
+	"github.com/segmentio/fasthash/fnv1a"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -31,6 +32,8 @@ const (
 	InitDataDirectory         = "../data/"
 	SessionName               = "isucholar_go"
 	mysqlErrNumDuplicateEntry = 1062
+
+	submitNumCacheMutexSize = 1000
 )
 
 type handlers struct {
@@ -38,6 +41,11 @@ type handlers struct {
 }
 
 var rds *redis.Client
+
+func hash(s string) int {
+	h1 := fnv1a.HashString32(s)
+	return int(h1)
+}
 
 func main() {
 	http.DefaultTransport.(*http.Transport).MaxIdleConnsPerHost = 1000
@@ -181,6 +189,7 @@ func (h *handlers) Initialize(c echo.Context) error {
 
 func initCache() {
 	submitNumCache = map[string]int{}
+	submitNumCacheMutexList = make([]sync.RWMutex, submitNumCacheMutexSize)
 }
 
 // IsLoggedIn ログイン確認用middleware
@@ -664,9 +673,11 @@ func (h *handlers) GetGrades(c echo.Context) error {
 		for _, class := range classes {
 			var submissionsCount int
 
-			submitNumCacheMutex.RLock()
+			id := hash(class.ID)
+
+			submitNumCacheMutexList[id%submitNumCacheMutexSize].RLock()
 			v, ok := submitNumCache[class.ID]
-			submitNumCacheMutex.RUnlock()
+			submitNumCacheMutexList[id%submitNumCacheMutexSize].RUnlock()
 			if ok {
 				submissionsCount = v
 			} else {
@@ -675,9 +686,9 @@ func (h *handlers) GetGrades(c echo.Context) error {
 					return c.NoContent(http.StatusInternalServerError)
 				}
 
-				submitNumCacheMutex.Lock()
+				submitNumCacheMutexList[id%submitNumCacheMutexSize].Lock()
 				submitNumCache[class.ID] = submissionsCount
-				submitNumCacheMutex.Unlock()
+				submitNumCacheMutexList[id%submitNumCacheMutexSize].Unlock()
 			}
 
 			if class.SubmissionScore != nil {
@@ -1249,7 +1260,7 @@ func (h *handlers) AddClass(c echo.Context) error {
 }
 
 var submitNumCache map[string]int
-var submitNumCacheMutex sync.RWMutex
+var submitNumCacheMutexList []sync.RWMutex
 
 // SubmitAssignment POST /api/courses/:courseID/classes/:classID/assignments 課題の提出
 func (h *handlers) SubmitAssignment(c echo.Context) error {
@@ -1328,14 +1339,15 @@ func (h *handlers) SubmitAssignment(c echo.Context) error {
 		return c.NoContent(http.StatusInternalServerError)
 	}
 
-	submitNumCacheMutex.Lock()
+	id := hash(classID)
+	submitNumCacheMutexList[id%submitNumCacheMutexSize].Lock()
 	v, ok := submitNumCache[classID]
 	if ok {
 		submitNumCache[classID] = v + 1
 	} else {
 		submitNumCache[classID] = 1
 	}
-	submitNumCacheMutex.Unlock()
+	submitNumCacheMutexList[id%submitNumCacheMutexSize].Unlock()
 
 	return c.NoContent(http.StatusNoContent)
 }
