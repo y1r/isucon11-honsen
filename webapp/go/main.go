@@ -1347,7 +1347,7 @@ func (h *handlers) RegisterScores(c echo.Context) error {
 		userCodes := []string{}
 
 		for _, score := range req {
-			userCodes = append(userCodes, "\"" + score.UserCode + "\"")
+			userCodes = append(userCodes, "\""+score.UserCode+"\"")
 		}
 		stmt = fmt.Sprintf(stmt, strings.Join(userCodes, ","))
 
@@ -1373,7 +1373,7 @@ func (h *handlers) RegisterScores(c echo.Context) error {
 			valueArgs = append(valueArgs, score.Score)
 		}
 
-		replaceStmt := fmt.Sprintf("INSERT INTO `submissions` (user_id, class_id, score) VALUES %s ON DUPLICATE KEY UPDATE user_id = VALUES(user_id), class_id = VALUES(class_id)", strings.Join(valueStrings, ","))
+		replaceStmt := fmt.Sprintf("INSERT INTO `submissions` (user_id, class_id, score) VALUES %s ON DUPLICATE KEY UPDATE user_id = VALUES(user_id), class_id = VALUES(class_id), score = VALUES(score), file_name = file_name", strings.Join(valueStrings, ","))
 		if _, err := tx.Exec(replaceStmt, valueArgs...); err != nil {
 			c.Logger().Error(err)
 			return c.NoContent(http.StatusInternalServerError)
