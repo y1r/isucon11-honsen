@@ -1348,7 +1348,7 @@ func (h *handlers) GetAnnouncementList(c echo.Context) error {
 	}
 
 	var shouldBeRead, readCount int
-	query2 := "SELECT COUNT(*) FROM `announcements` WHERE " +
+	query2 := "SELECT COUNT(*) FROM `announcements` " +
 		" JOIN `courses` ON `announcements`.`course_id` = `courses`.`id`" +
 		" JOIN `registrations` ON `courses`.`id` = `registrations`.`course_id` AND `registrations`.`user_id` = ?"
 	if err := tx.Get(&shouldBeRead, query2, userID); err != nil {
