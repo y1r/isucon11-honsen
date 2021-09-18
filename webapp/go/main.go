@@ -1329,6 +1329,10 @@ func (h *handlers) SubmitAssignment(c echo.Context) error {
 	}
 
 	dst := AssignmentsDirectory + classID + "-" + userID + ".pdf"
+
+	_, err = os.Stat(dst)
+	isNotExists := os.IsNotExist(err)
+
 	if err := os.WriteFile(dst, data, 0666); err != nil {
 		c.Logger().Error(err)
 		return c.NoContent(http.StatusInternalServerError)
@@ -1339,15 +1343,17 @@ func (h *handlers) SubmitAssignment(c echo.Context) error {
 		return c.NoContent(http.StatusInternalServerError)
 	}
 
-	id := hash(classID)
-	submitNumCacheMutexList[id%submitNumCacheMutexSize].Lock()
-	v, ok := submitNumCache[classID]
-	if ok {
-		submitNumCache[classID] = v + 1
-	} else {
-		submitNumCache[classID] = 1
+	if isNotExists {
+		id := hash(classID)
+		submitNumCacheMutexList[id%submitNumCacheMutexSize].Lock()
+		v, ok := submitNumCache[classID]
+		if ok {
+			submitNumCache[classID] = v + 1
+		} else {
+			submitNumCache[classID] = 1
+		}
+		submitNumCacheMutexList[id%submitNumCacheMutexSize].Unlock()
 	}
-	submitNumCacheMutexList[id%submitNumCacheMutexSize].Unlock()
 
 	return c.NoContent(http.StatusNoContent)
 }
