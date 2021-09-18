@@ -116,23 +116,21 @@ func (h *handlers) Initialize(c echo.Context) error {
 
 	// gpaの初期値計算
 	var users []User
-	query := "SELECT `users`.* FROM `users`"
+	query := "SELECT `users`.* FROM `users` WHERE type = 'student'"
 	if err := h.DB.Select(&users, query); err != nil {
 		c.Logger().Error(err)
 		return c.NoContent(http.StatusInternalServerError)
 	}
 	for _, user := range users {
-		if user.Type == Student {
-			// サンプルSQLでは、履修者がいる講義でクローズされたものがないため、すべて0で初期化でOK
-			query = `
-				INSERT INTO gpas(user_id, credits, total_score) VALUES(
-					?, ?, ?
-				)
-			`
-			if _, err := h.DB.Exec(query, user.ID, 0, 0); err != nil {
-				c.Logger().Error(err)
-				return c.NoContent(http.StatusInternalServerError)
-			}
+		// サンプルSQLでは、履修者がいる講義でクローズされたものがないため、すべて0で初期化でOK
+		query = `
+			INSERT INTO gpas(user_id, credits, total_score) VALUES(
+				?, 0, 0
+			)
+		`
+		if _, err := h.DB.Exec(query, user.ID); err != nil {
+			c.Logger().Error(err)
+			return c.NoContent(http.StatusInternalServerError)
 		}
 	}
 
