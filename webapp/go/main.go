@@ -1397,7 +1397,7 @@ func (h *handlers) GetAnnouncementList(c echo.Context) error {
 		return c.NoContent(http.StatusInternalServerError)
 	}
 
-	readCount, err := pipe.SCard(context.TODO(), userID).Result()
+	readCount, err := rds.SCard(context.TODO(), userID).Result()
 	if err != nil {
 		c.Logger().Error(err)
 		return c.NoContent(http.StatusInternalServerError)
