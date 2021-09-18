@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/go-redis/redis/v8"
 	"github.com/go-sql-driver/mysql"
@@ -96,6 +97,7 @@ func main() {
 		DB:       0,
 	})
 
+	initCache()
 	e.Logger.Error(e.StartServer(e.Server))
 }
 
@@ -169,10 +171,16 @@ func (h *handlers) Initialize(c echo.Context) error {
 		}
 	}
 
+	initCache()
+
 	res := InitializeResponse{
 		Language: "go",
 	}
 	return c.JSON(http.StatusOK, res)
+}
+
+func initCache() {
+	submitNumCache = map[string]int{}
 }
 
 // IsLoggedIn ログイン確認用middleware
@@ -1228,6 +1236,9 @@ func (h *handlers) AddClass(c echo.Context) error {
 	return c.JSON(http.StatusCreated, AddClassResponse{ClassID: classID})
 }
 
+var submitNumCache map[string]int
+var submitNumCacheMutex sync.Mutex
+
 // SubmitAssignment POST /api/courses/:courseID/classes/:classID/assignments 課題の提出
 func (h *handlers) SubmitAssignment(c echo.Context) error {
 	userID, _, _, err := getUserInfo(c)
@@ -1304,6 +1315,15 @@ func (h *handlers) SubmitAssignment(c echo.Context) error {
 		c.Logger().Error(err)
 		return c.NoContent(http.StatusInternalServerError)
 	}
+
+	submitNumCacheMutex.Lock()
+	v, ok := submitNumCache[classID]
+	if ok {
+		submitNumCache[classID] = v + 1
+	} else {
+		submitNumCache[classID] = 1
+	}
+	submitNumCacheMutex.Unlock()
 
 	return c.NoContent(http.StatusNoContent)
 }
