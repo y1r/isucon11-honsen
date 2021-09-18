@@ -690,10 +690,10 @@ func (h *handlers) GetGrades(c echo.Context) error {
 	// 一つでも修了した科目がある学生のGPA一覧
 	query = `
 		SELECT
-			AVG(gpa) AS gpa_avg,
-			MAX(gpa) AS gpa_max,
-			MIN(gpa) AS gpa_min,
-			STDDEV(gpa) AS gpa_std_dev
+			COALESCE(AVG(gpa), 0) AS gpa_avg,
+			COALESCE(MAX(gpa), 0) AS gpa_max,
+			COALESCE(MIN(gpa), 0) AS gpa_min,
+			COALESCE(STDDEV(gpa), 0) AS gpa_std_dev
 		FROM gpas
 		WHERE credits > 0
 	`
@@ -702,11 +702,18 @@ func (h *handlers) GetGrades(c echo.Context) error {
 		return c.NoContent(http.StatusInternalServerError)
 	}
 
+	var tScore float64
+	if toukeichi.GpaStdDev == 0 {
+		tScore = 50
+	} else {
+		tScore = (myGPA-toukeichi.GpaAvg)/toukeichi.GpaStdDev*10 + 50
+	}
+
 	res := GetGradeResponse{
 		Summary: Summary{
 			Credits:   myCredits,
 			GPA:       myGPA,
-			GpaTScore: (myGPA-toukeichi.GpaAvg)/toukeichi.GpaStdDev*10 + 50,
+			GpaTScore: tScore,
 			GpaAvg:    toukeichi.GpaAvg,
 			GpaMax:    toukeichi.GpaMax,
 			GpaMin:    toukeichi.GpaMin,
