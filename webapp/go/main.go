@@ -1009,6 +1009,7 @@ func (h *handlers) SetCourseStatus(c echo.Context) error {
 				ON submissions.class_id = classes.id
 				AND submissions.user_id = users.id
 			GROUP BY users.id
+			FOR UPDATE
 		`
 		if err := tx.Select(&targets, query, courseID); err != nil {
 			c.Logger().Error(err)
