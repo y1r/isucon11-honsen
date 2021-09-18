@@ -974,13 +974,19 @@ func (h *handlers) SetCourseStatus(c echo.Context) error {
 	}
 	defer tx.Rollback()
 
-	var course *Course
-	if err := tx.Get(&course, "SELECT * FROM `courses` WHERE `id` = ? LIMIT 1 FOR UPDATE", courseID); err != nil && err != sql.ErrNoRows {
+	var count int
+	if err := tx.Get(&count, "SELECT COUNT(*) FROM `courses` WHERE `id` = ? FOR UPDATE", courseID); err != nil {
 		c.Logger().Error(err)
 		return c.NoContent(http.StatusInternalServerError)
 	}
-	if err == sql.ErrNoRows || course == nil {
+	if count == 0 {
 		return c.String(http.StatusNotFound, "No such course.")
+	}
+
+	var course Course
+	if err := tx.Get(&course, "SELECT * FROM `courses` WHERE `id` = ? FOR UPDATE", courseID); err != nil && err != sql.ErrNoRows {
+		c.Logger().Error(err)
+		return c.NoContent(http.StatusInternalServerError)
 	}
 
 	if _, err := tx.Exec("UPDATE `courses` SET `status` = ? WHERE `id` = ?", req.Status, courseID); err != nil {
