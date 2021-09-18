@@ -1373,7 +1373,7 @@ func (h *handlers) RegisterScores(c echo.Context) error {
 			valueArgs = append(valueArgs, score.Score)
 		}
 
-		replaceStmt := fmt.Sprintf("REPLACE INTO `submissions` (user_id, class_id, score) VALUES %s", strings.Join(valueStrings, ","))
+		replaceStmt := fmt.Sprintf("INSERT INTO `submissions` (user_id, class_id, score) VALUES %s ON DUPLICATE KEY UPDATE user_id = VALUES(user_id), class_id = VALUES(class_id)", strings.Join(valueStrings, ","))
 		if _, err := tx.Exec(replaceStmt, valueArgs...); err != nil {
 			c.Logger().Error(err)
 			return c.NoContent(http.StatusInternalServerError)
