@@ -1492,7 +1492,7 @@ func (h *handlers) GetAnnouncementDetail(c echo.Context) error {
 	defer tx.Rollback()
 
 	var announcement AnnouncementDetail
-	query := "SELECT `announcements`.`id`, `courses`.`id` AS `course_id`, `courses`.`name` AS `course_name`, `announcements`.`title`, NOT IFNULL(`unread_announcements`.`is_deleted`, FALSE) AS `unread`" +
+	query := "SELECT `announcements`.`id`, `courses`.`id` AS `course_id`, `courses`.`name` AS `course_name`, `announcements`.`title`, `announcements`.`message`, NOT IFNULL(`unread_announcements`.`is_deleted`, FALSE) AS `unread`" +
 		" FROM `announcements`" +
 		" JOIN `courses` ON `courses`.`id` = `announcements`.`course_id`" +
 		" JOIN `registrations` ON `courses`.`id` = `registrations`.`course_id` " +
