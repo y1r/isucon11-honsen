@@ -1517,9 +1517,11 @@ func (h *handlers) GetAnnouncementDetail(c echo.Context) error {
 	}
 
 	// TODO: rewrite here by redis
-	if _, err := tx.Exec("INSERT INTO `unread_announcements` (`announcement_id`, `user_id`, `is_deleted`) VALUES (?, ?, ?)", announcementID, userID, true); err != nil {
-		c.Logger().Error(err)
-		return c.NoContent(http.StatusInternalServerError)
+	if announcement.Unread {
+		if _, err := tx.Exec("INSERT INTO `unread_announcements` (`announcement_id`, `user_id`, `is_deleted`) VALUES (?, ?, ?)", announcementID, userID, true); err != nil {
+			c.Logger().Error(err)
+			return c.NoContent(http.StatusInternalServerError)
+		}
 	}
 
 	if err := tx.Commit(); err != nil {
