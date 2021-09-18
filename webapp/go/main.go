@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/url"
 	"os"
@@ -55,7 +56,7 @@ func main() {
 	e.Server.Addr = fmt.Sprintf(":%v", GetEnv("PORT", "7000"))
 	e.HideBanner = true
 
-	e.Use(middleware.Logger())
+	//e.Use(middleware.Logger())
 	e.Use(middleware.Recover())
 	e.Use(session.Middleware(sessions.NewCookieStore([]byte("trapnomura"))))
 
@@ -1318,8 +1319,7 @@ func (h *handlers) SubmitAssignment(c echo.Context) error {
 		return c.NoContent(http.StatusInternalServerError)
 	}
 
-	data, err := io.ReadAll(file)
-	if err != nil {
+	if err := tx.Commit(); err != nil {
 		c.Logger().Error(err)
 		return c.NoContent(http.StatusInternalServerError)
 	}
@@ -1329,15 +1329,17 @@ func (h *handlers) SubmitAssignment(c echo.Context) error {
 	_, err = os.Stat(dst)
 	isNotExists := os.IsNotExist(err)
 
-	if err := os.WriteFile(dst, data, 0666); err != nil {
-		c.Logger().Error(err)
-		return c.NoContent(http.StatusInternalServerError)
-	}
+	go func(file2 multipart.File, classID string, userID string) {
+		data, err := io.ReadAll(file2)
+		if err != nil {
+			c.Logger().Error(err)
+		}
 
-	if err := tx.Commit(); err != nil {
-		c.Logger().Error(err)
-		return c.NoContent(http.StatusInternalServerError)
-	}
+		dst := AssignmentsDirectory + classID + "-" + userID + ".pdf"
+		if err := os.WriteFile(dst, data, 0666); err != nil {
+			c.Logger().Error(err)
+		}
+	}(file, classID, userID)
 
 	if isNotExists {
 		id := hash(classID)
@@ -1387,8 +1389,39 @@ func (h *handlers) RegisterScores(c echo.Context) error {
 		return c.String(http.StatusBadRequest, "Invalid format.")
 	}
 
-	for _, score := range req {
-		if _, err := tx.Exec("UPDATE `submissions` JOIN `users` ON `users`.`id` = `submissions`.`user_id` SET `score` = ? WHERE `users`.`code` = ? AND `class_id` = ?", score.Score, score.UserCode, classID); err != nil {
+	if 0 < len(req) {
+		stmt := "SELECT `id`, `code` FROM users where code in (%s)"
+		userCodes := []string{}
+
+		for _, score := range req {
+			userCodes = append(userCodes, "\""+score.UserCode+"\"")
+		}
+		stmt = fmt.Sprintf(stmt, strings.Join(userCodes, ","))
+
+		var users []User
+		err = tx.Select(&users, stmt)
+		if err != nil {
+			c.Logger().Error(err)
+			return c.NoContent(http.StatusInternalServerError)
+		}
+
+		userCode2id := map[string]string{}
+		for _, user := range users {
+			userCode2id[user.Code] = user.ID
+		}
+
+		valueStrings := []string{}
+		valueArgs := [](interface{}){}
+
+		for _, score := range req {
+			valueStrings = append(valueStrings, "(?, ?, ?)")
+			valueArgs = append(valueArgs, userCode2id[score.UserCode])
+			valueArgs = append(valueArgs, classID)
+			valueArgs = append(valueArgs, score.Score)
+		}
+
+		replaceStmt := fmt.Sprintf("INSERT INTO `submissions` (user_id, class_id, score) VALUES %s ON DUPLICATE KEY UPDATE user_id = VALUES(user_id), class_id = VALUES(class_id), score = VALUES(score), file_name = file_name", strings.Join(valueStrings, ","))
+		if _, err := tx.Exec(replaceStmt, valueArgs...); err != nil {
 			c.Logger().Error(err)
 			return c.NoContent(http.StatusInternalServerError)
 		}
