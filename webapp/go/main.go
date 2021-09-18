@@ -962,26 +962,6 @@ func (h *handlers) SetCourseStatus(c echo.Context) error {
 	}
 
 	if req.Status == StatusClosed {
-		// TODO: N+1をやめたい
-
-		// query := `
-		// 	UPDATE gpas SET
-		// 		credits = credits + 1
-		// 		total_score = total_score + (
-		// 			/* TODO */
-		// 		)
-		// 	FROM
-		// 		gpas
-		// 		INNER JOIN registrations
-		// 		ON registrations.user_id = gpas.user_id
-		// 	WHERE
-		// 		registrations.course_id = ?
-		// `
-		// if _, err := tx.Exec(query, courseID); err != nil {
-		// 	c.Logger().Error(err)
-		// 	return c.NoContent(http.StatusInternalServerError)
-		// }
-
 		type UserWithScore struct {
 			User
 			TotalScore int `db:"total_score"`
@@ -1007,18 +987,20 @@ func (h *handlers) SetCourseStatus(c echo.Context) error {
 			c.Logger().Error(err)
 			return c.NoContent(http.StatusInternalServerError)
 		}
+
+		query = "INSERT INTO gpas(user_id, credits, total_score) VALUES "
+		strArgs := []string{}
 		for _, target := range targets {
-			query = `
-				UPDATE gpas SET
-					credits = credits + 1,
-					total_score = total_score + ?
-				WHERE
-					user_id = ?
-			`
-			if _, err = h.DB.Exec(query, target.TotalScore, target.User.ID); err != nil {
-				c.Logger().Error(err)
-				return c.NoContent(http.StatusInternalServerError)
-			}
+			strArgs = append(
+				strArgs,
+				fmt.Sprintf("('%s', 1, %d)", target.User.ID, target.TotalScore),
+			)
+		}
+		query += strings.Join(strArgs, ", ")
+		query += " ON DUPLICATE KEY UPDATE credits = credits + 1, total_score = total_score + VALUES(total_score)"
+		if _, err = h.DB.Exec(query); err != nil {
+			c.Logger().Error(err)
+			return c.NoContent(http.StatusInternalServerError)
 		}
 	}
 
