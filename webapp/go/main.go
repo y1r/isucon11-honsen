@@ -783,7 +783,7 @@ func (h *handlers) GetGrades(c echo.Context) error {
 
 // SearchCourses GET /api/courses 科目検索
 func (h *handlers) SearchCourses(c echo.Context) error {
-	query := "SELECT `courses`.*, `users`.`name` AS `teacher`" +
+	query := "SELECT `courses`.`id`, `courses`.`code`, `courses`.`type`, `courses`.`name`, `courses`.`description`, `courses`.`credit`, `courses`.`period`, `courses`.`day_of_week`, `courses`.`teacher_id`, `courses`.`keywords`, `courses`.`status`, `users`.`name` AS `teacher`" +
 		" FROM `courses` JOIN `users` ON `courses`.`teacher_id` = `users`.`id`" +
 		" WHERE 1=1"
 	var condition string
