@@ -136,15 +136,13 @@ func (h *handlers) Initialize(c echo.Context) error {
 
 	var readAnnouncements []UnreadAnnouncement
 	if err := h.DB.Select(&readAnnouncements, "SELECT announcement_id, user_id from unread_announcements"); err != nil {
-		pipe := rds.Pipeline()
 		for _, announcement := range readAnnouncements {
-			_, err = pipe.SAdd(context.TODO(), announcement.UserID, announcement.AnnouncementID).Result()
+			_, err = rds.SAdd(context.TODO(), announcement.UserID, announcement.AnnouncementID).Result()
 			if err != nil {
 				c.Logger().Error(err)
 				return c.NoContent(http.StatusInternalServerError)
 			}
 		}
-		err := pipe.Close()
 		if err != nil {
 			c.Logger().Error(err)
 			return c.NoContent(http.StatusInternalServerError)
@@ -1373,9 +1371,8 @@ func (h *handlers) GetAnnouncementList(c echo.Context) error {
 		return c.NoContent(http.StatusInternalServerError)
 	}
 
-	pipe := rds.Pipeline()
 	for i := range announcements {
-		read, err := pipe.SIsMember(context.TODO(), userID, announcements[i].ID).Result()
+		read, err := rds.SIsMember(context.TODO(), userID, announcements[i].ID).Result()
 		if err != nil {
 			c.Logger().Error(err)
 			return c.NoContent(http.StatusInternalServerError)
@@ -1392,19 +1389,18 @@ func (h *handlers) GetAnnouncementList(c echo.Context) error {
 		return c.NoContent(http.StatusInternalServerError)
 	}
 
-	if err := tx.Commit(); err != nil {
-		c.Logger().Error(err)
-		return c.NoContent(http.StatusInternalServerError)
-	}
-
-	readCount, err := pipe.SCard(context.TODO(), userID).Result()
+	readCount, err := rds.SCard(context.TODO(), userID).Result()
 	if err != nil {
 		c.Logger().Error(err)
 		return c.NoContent(http.StatusInternalServerError)
 	}
 	fmt.Printf("aaa %d %s %v\n", readCount, userID, err)
-	err = pipe.Close()
 	if err != nil {
+		c.Logger().Error(err)
+		return c.NoContent(http.StatusInternalServerError)
+	}
+
+	if err := tx.Commit(); err != nil {
 		c.Logger().Error(err)
 		return c.NoContent(http.StatusInternalServerError)
 	}
