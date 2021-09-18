@@ -680,7 +680,7 @@ func (h *handlers) GetGrades(c echo.Context) error {
 	}
 
 	type Toukeichi struct {
-		GpaAvg    float64 `db:"gpa_ave"`
+		GpaAvg    float64 `db:"gpa_avg"`
 		GpaMax    float64 `db:"gpa_max"`
 		GpaMin    float64 `db:"gpa_min"`
 		GpaStdDev float64 `db:"gpa_std_dev"`
