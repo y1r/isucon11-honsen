@@ -685,10 +685,6 @@ func (h *handlers) GetGrades(c echo.Context) error {
 					c.Logger().Error(err)
 					return c.NoContent(http.StatusInternalServerError)
 				}
-
-				submitNumCacheMutexList[id%submitNumCacheMutexSize].Lock()
-				submitNumCache[class.ID] = submissionsCount
-				submitNumCacheMutexList[id%submitNumCacheMutexSize].Unlock()
 			}
 
 			if class.SubmissionScore != nil {
