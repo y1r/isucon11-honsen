@@ -974,12 +974,12 @@ func (h *handlers) SetCourseStatus(c echo.Context) error {
 	}
 	defer tx.Rollback()
 
-	var count int
-	if err := tx.Get(&count, "SELECT COUNT(*) FROM `courses` WHERE `id` = ? FOR UPDATE", courseID); err != nil {
+	var course Course
+	if err := tx.Get(&course, "SELECT * FROM `courses` WHERE `id` = ? FOR UPDATE", courseID); err != nil && err != sql.ErrNoRows {
 		c.Logger().Error(err)
 		return c.NoContent(http.StatusInternalServerError)
 	}
-	if count == 0 {
+	if err == sql.ErrNoRows {
 		return c.String(http.StatusNotFound, "No such course.")
 	}
 
@@ -1021,11 +1021,11 @@ func (h *handlers) SetCourseStatus(c echo.Context) error {
 		for _, target := range targets {
 			strArgs = append(
 				strArgs,
-				fmt.Sprintf("('%s', 1, %d)", target.User.ID, target.TotalScore),
+				fmt.Sprintf("('%s', %d, %d)", target.User.ID, course.Credit, target.TotalScore*int(course.Credit)),
 			)
 		}
 		query += strings.Join(strArgs, ", ")
-		query += " ON DUPLICATE KEY UPDATE credits = credits + 1, total_score = total_score + VALUES(total_score)"
+		query += " ON DUPLICATE KEY UPDATE credits = credits + VALUES(credits), total_score = total_score + VALUES(total_score)"
 		if _, err = tx.Exec(query); err != nil {
 			c.Logger().Error(err)
 			return c.NoContent(http.StatusInternalServerError)
