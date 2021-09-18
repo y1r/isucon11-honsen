@@ -629,12 +629,23 @@ func (h *handlers) GetGrades(c echo.Context) error {
 	myCredits := 0
 	for _, course := range registeredCourses {
 		// 講義一覧の取得
-		var classes []Class
-		query = "SELECT *" +
-			" FROM `classes`" +
-			" WHERE `course_id` = ?" +
-			" ORDER BY `part` DESC"
-		if err := h.DB.Select(&classes, query, course.ID); err != nil {
+		type ClassWithSubmission struct {
+			Class
+			SubmissionScore *int `db:"submission_score"`
+		}
+		var classes []ClassWithSubmission
+		query = `
+			SELECT
+				classes.*,
+				submissions.score AS submission_score
+			FROM classes
+			LEFT JOIN submissions
+				ON submissions.class_id = classes.id
+				AND submissions.user_id = ?
+			WHERE course_id = ?
+			ORDER BY part DESC
+		`
+		if err := h.DB.Select(&classes, query, userID, course.ID); err != nil {
 			c.Logger().Error(err)
 			return c.NoContent(http.StatusInternalServerError)
 		}
@@ -649,29 +660,17 @@ func (h *handlers) GetGrades(c echo.Context) error {
 				return c.NoContent(http.StatusInternalServerError)
 			}
 
-			var myScore sql.NullInt64
-			if err := h.DB.Get(&myScore, "SELECT `submissions`.`score` FROM `submissions` WHERE `user_id` = ? AND `class_id` = ?", userID, class.ID); err != nil && err != sql.ErrNoRows {
-				c.Logger().Error(err)
-				return c.NoContent(http.StatusInternalServerError)
-			} else if err == sql.ErrNoRows || !myScore.Valid {
-				classScores = append(classScores, ClassScore{
-					ClassID:    class.ID,
-					Part:       class.Part,
-					Title:      class.Title,
-					Score:      nil,
-					Submitters: submissionsCount,
-				})
-			} else {
-				score := int(myScore.Int64)
-				myTotalScore += score
-				classScores = append(classScores, ClassScore{
-					ClassID:    class.ID,
-					Part:       class.Part,
-					Title:      class.Title,
-					Score:      &score,
-					Submitters: submissionsCount,
-				})
+			if class.SubmissionScore != nil {
+				myTotalScore += *class.SubmissionScore
 			}
+
+			classScores = append(classScores, ClassScore{
+				ClassID:    class.ID,
+				Part:       class.Part,
+				Title:      class.Title,
+				Score:      class.SubmissionScore,
+				Submitters: submissionsCount,
+			})
 		}
 
 		if course.Status == StatusClosed {
