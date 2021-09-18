@@ -983,7 +983,7 @@ func (h *handlers) SetCourseStatus(c echo.Context) error {
 				AND submissions.user_id = users.id
 			GROUP BY users.id
 		`
-		if err := h.DB.Select(&targets, query); err != nil {
+		if err := tx.Select(&targets, query); err != nil {
 			c.Logger().Error(err)
 			return c.NoContent(http.StatusInternalServerError)
 		}
@@ -998,7 +998,7 @@ func (h *handlers) SetCourseStatus(c echo.Context) error {
 		}
 		query += strings.Join(strArgs, ", ")
 		query += " ON DUPLICATE KEY UPDATE credits = credits + 1, total_score = total_score + VALUES(total_score)"
-		if _, err = h.DB.Exec(query); err != nil {
+		if _, err = tx.Exec(query); err != nil {
 			c.Logger().Error(err)
 			return c.NoContent(http.StatusInternalServerError)
 		}
