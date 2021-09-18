@@ -968,7 +968,7 @@ func (h *handlers) GetCourseDetail(c echo.Context) error {
 	courseID := c.Param("courseID")
 
 	var res GetCourseDetailResponse
-	query := "SELECT `courses`.*, `users`.`name` AS `teacher`" +
+	query := "SELECT `courses`.`id`, `courses`.`code`, `courses`.`type`, `courses`.`name`, `courses`.`description`, `courses`.`credit`, `courses`.`period`, `courses`.`day_of_week`, `courses`.`teacher_id`, `courses`.`keywords`, `courses`.`status`, `users`.`name` AS `teacher`" +
 		" FROM `courses`" +
 		" JOIN `users` ON `courses`.`teacher_id` = `users`.`id`" +
 		" WHERE `courses`.`id` = ?"
