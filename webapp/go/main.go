@@ -963,7 +963,7 @@ func (h *handlers) SetCourseStatus(c echo.Context) error {
 		// query := `
 		// 	UPDATE gpas SET
 		// 		credits = credits + 1
-		// 		total_scores = total_scores + (
+		// 		total_score = total_score + (
 		// 			/* TODO */
 		// 		)
 		// 	FROM
