@@ -1322,11 +1322,10 @@ func (h *handlers) GetAnnouncementList(c echo.Context) error {
 		args = append(args, courseID)
 	}
 
-	query += " AND `unread_announcements`.`user_id` = ?" +
-		" AND `registrations`.`user_id` = ?" +
+	query += " AND `registrations`.`user_id` = ?" +
 		" ORDER BY `announcements`.`id` DESC" +
 		" LIMIT ? OFFSET ?"
-	args = append(args, userID, userID)
+	args = append(args, userID)
 
 	var page int
 	if c.QueryParam("page") == "" {
