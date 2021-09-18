@@ -974,12 +974,12 @@ func (h *handlers) SetCourseStatus(c echo.Context) error {
 	}
 	defer tx.Rollback()
 
-	var course Course
+	var course *Course
 	if err := tx.Get(&course, "SELECT * FROM `courses` WHERE `id` = ? LIMIT 1 FOR UPDATE", courseID); err != nil && err != sql.ErrNoRows {
 		c.Logger().Error(err)
 		return c.NoContent(http.StatusInternalServerError)
 	}
-	if err == sql.ErrNoRows {
+	if err == sql.ErrNoRows || course == nil {
 		return c.String(http.StatusNotFound, "No such course.")
 	}
 
