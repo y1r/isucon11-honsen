@@ -4,7 +4,7 @@ INSERT INTO `users` (`id`, `code`, `name`, `hashed_password`, `type`) VALUES
 ('01FF4RXEKS0DG2EG20CQVX6FV0','S99998','isucon2','$2a$04$abH7BE13odlVdw.rLLDvT.mWcTsvR.FXIm0.Pu0p2iiE4WvV6N51O','student'),
 ('01FF4RXEKS0DG2EG20CTTAPEVH','S99997','isucon3','$2a$04$6q3Lb.KYJLkkaWx34DMVy.1t2icsMbzW1eQvwFzXesHW3encgz/ru','student');
 
-INSERT INTO `courses` VALUES
+INSERT INTO `courses`(`id`, `code`, `type`, `name`, `description`, `credit`, `period`, `day_of_week`, `teacher_id`, `keywords`, `status`) VALUES
 ('01FF4RXEKS0DG2EG20CWPQ60M3','X0001','major-subjects','ISUCON演習第一','この科目ではISUCONの過去問を通してサーバのチューニングアップを学びます。課題は講義中に出題するクイズへの回答を提出してください。本講義の成績は課題の提出状況により判断します。',1,1,'monday','01FF4RXEKS0DG2EG20CKDWS7CC','ISUCON SpeedUP','in-progress'),
 ('01FF4RXEKS0DG2EG20CYAYCCGM','X0002','major-subjects','ISUCON演習第二','この科目ではISUCONの過去問を通してサーバのチューニングアップを学びます。課題は講義中に出題するクイズへの回答を提出してください。本講義の成績は課題の提出状況により判断します。',1,1,'tuesday','01FF4RXEKS0DG2EG20CKDWS7CC','ISUCON SpeedUP','in-progress'),
 ('01FF4RXEKS0DG2EG20D23EQZRY','X0003','major-subjects','ISUCON演習第三','この科目ではISUCONの過去問を通してサーバのチューニングアップを学びます。課題は講義中に出題するクイズへの回答を提出してください。本講義の成績は課題の提出状況により判断します。',1,1,'wednesday','01FF4RXEKS0DG2EG20CKDWS7CC','ISUCON SpeedUP','registration');
