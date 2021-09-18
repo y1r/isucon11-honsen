@@ -681,25 +681,26 @@ func (h *handlers) GetGrades(c echo.Context) error {
 		myGPA = myGPA / 100 / float64(myCredits)
 	}
 
+	type Toukeichi struct {
+		GpaAvg    float64 `db:"gpa_ave"`
+		GpaMax    float64 `db:"gpa_max"`
+		GpaMin    float64 `db:"gpa_min"`
+		GpaStdDev float64 `db:"gpa_std_dev"`
+	}
+	var toukeichi Toukeichi
+
 	// GPAの統計値
 	// 一つでも修了した科目がある学生のGPA一覧
-	var gpas []float64
-	query = "SELECT IFNULL(SUM(`submissions`.`score` * `courses`.`credit`), 0) / 100 / `credits`.`credits` AS `gpa`" +
-		" FROM `users`" +
-		" JOIN (" +
-		"     SELECT `users`.`id` AS `user_id`, SUM(`courses`.`credit`) AS `credits`" +
-		"     FROM `users`" +
-		"     JOIN `registrations` ON `users`.`id` = `registrations`.`user_id`" +
-		"     JOIN `courses` ON `registrations`.`course_id` = `courses`.`id` AND `courses`.`status` = ?" +
-		"     GROUP BY `users`.`id`" +
-		" ) AS `credits` ON `credits`.`user_id` = `users`.`id`" +
-		" JOIN `registrations` ON `users`.`id` = `registrations`.`user_id`" +
-		" JOIN `courses` ON `registrations`.`course_id` = `courses`.`id` AND `courses`.`status` = ?" +
-		" LEFT JOIN `classes` ON `courses`.`id` = `classes`.`course_id`" +
-		" LEFT JOIN `submissions` ON `users`.`id` = `submissions`.`user_id` AND `submissions`.`class_id` = `classes`.`id`" +
-		" WHERE `users`.`type` = ?" +
-		" GROUP BY `users`.`id`"
-	if err := h.DB.Select(&gpas, query, StatusClosed, StatusClosed, Student); err != nil {
+	query = `
+		SELECT
+			AVG(gpa) AS gpa_avg,
+			MAX(gpa) AS gpa_max,
+			MIN(gpa) AS gpa_min,
+			STDDEV(gpa) AS gpa_std_dev
+		FROM gpas
+		WHERE credits > 0
+	`
+	if err := h.DB.Get(&toukeichi, query); err != nil {
 		c.Logger().Error(err)
 		return c.NoContent(http.StatusInternalServerError)
 	}
@@ -708,10 +709,10 @@ func (h *handlers) GetGrades(c echo.Context) error {
 		Summary: Summary{
 			Credits:   myCredits,
 			GPA:       myGPA,
-			GpaTScore: tScoreFloat64(myGPA, gpas),
-			GpaAvg:    averageFloat64(gpas, 0),
-			GpaMax:    maxFloat64(gpas, 0),
-			GpaMin:    minFloat64(gpas, 0),
+			GpaTScore: (myGPA-toukeichi.GpaAvg)/toukeichi.GpaStdDev*10 + 50,
+			GpaAvg:    toukeichi.GpaAvg,
+			GpaMax:    toukeichi.GpaMax,
+			GpaMin:    toukeichi.GpaMin,
 		},
 		CourseResults: courseResults,
 	}
