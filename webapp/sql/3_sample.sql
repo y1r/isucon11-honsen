@@ -4,7 +4,7 @@ INSERT INTO `users` (`id`, `code`, `name`, `hashed_password`, `type`) VALUES
 ('01FF4RXEKS0DG2EG20CQVX6FV0','S99998','isucon2','$2a$04$abH7BE13odlVdw.rLLDvT.mWcTsvR.FXIm0.Pu0p2iiE4WvV6N51O','student'),
 ('01FF4RXEKS0DG2EG20CTTAPEVH','S99997','isucon3','$2a$04$6q3Lb.KYJLkkaWx34DMVy.1t2icsMbzW1eQvwFzXesHW3encgz/ru','student');
 
-INSERT INTO `courses` VALUES
+INSERT INTO `courses`(`id`, `code`, `type`, `name`, `description`, `credit`, `period`, `day_of_week`, `teacher_id`, `keywords`, `status`) VALUES
 ('01FF4RXEKS0DG2EG20CWPQ60M3','X0001','major-subjects','ISUCON演習第一','この科目ではISUCONの過去問を通してサーバのチューニングアップを学びます。課題は講義中に出題するクイズへの回答を提出してください。本講義の成績は課題の提出状況により判断します。',1,1,'monday','01FF4RXEKS0DG2EG20CKDWS7CC','ISUCON SpeedUP','in-progress'),
 ('01FF4RXEKS0DG2EG20CYAYCCGM','X0002','major-subjects','ISUCON演習第二','この科目ではISUCONの過去問を通してサーバのチューニングアップを学びます。課題は講義中に出題するクイズへの回答を提出してください。本講義の成績は課題の提出状況により判断します。',1,1,'tuesday','01FF4RXEKS0DG2EG20CKDWS7CC','ISUCON SpeedUP','in-progress'),
 ('01FF4RXEKS0DG2EG20D23EQZRY','X0003','major-subjects','ISUCON演習第三','この科目ではISUCONの過去問を通してサーバのチューニングアップを学びます。課題は講義中に出題するクイズへの回答を提出してください。本講義の成績は課題の提出状況により判断します。',1,1,'wednesday','01FF4RXEKS0DG2EG20CKDWS7CC','ISUCON SpeedUP','registration');
@@ -29,12 +29,12 @@ INSERT INTO `announcements` VALUES
 ('01FF4RXEKS0DG2EG20DBT4PFHF','01FF4RXEKS0DG2EG20CWPQ60M3','講義追加: ISUCON6 予選','講義が新しく追加されました: ISUCON6 予選\n本日はISUCON6 予選の過去問を実施します。課題は講義中に出題するクイズへの回答を提出してください。'),
 ('01FF4RXEKS0DG2EG20DDPCS14P','01FF4RXEKS0DG2EG20CWPQ60M3','講義追加: ISUCON7 予選','講義が新しく追加されました: ISUCON7 予選\n本日はISUCON7 予選の過去問を実施します。課題は講義中に出題するクイズへの回答を提出してください。');
 
+#('01FF4RXEKS0DG2EG20DDPCS14P','01FF4RXEKS0DG2EG20CN2GJB8K',false),
 INSERT INTO `unread_announcements` VALUES
 ('01FF4RXEKS0DG2EG20D6N5CNRQ','01FF4RXEKS0DG2EG20CN2GJB8K',true),
 ('01FF4RXEKS0DG2EG20DA1W34X3','01FF4RXEKS0DG2EG20CN2GJB8K',true),
 ('01FF4RXEKS0DG2EG20DAGTWP61','01FF4RXEKS0DG2EG20CN2GJB8K',true),
 ('01FF4RXEKS0DG2EG20DBT4PFHF','01FF4RXEKS0DG2EG20CN2GJB8K',true),
-('01FF4RXEKS0DG2EG20DDPCS14P','01FF4RXEKS0DG2EG20CN2GJB8K',false),
 ('01FF4RXEKS0DG2EG20D6N5CNRQ','01FF4RXEKS0DG2EG20CQVX6FV0',true),
 ('01FF4RXEKS0DG2EG20DA1W34X3','01FF4RXEKS0DG2EG20CQVX6FV0',true),
 ('01FF4RXEKS0DG2EG20DAGTWP61','01FF4RXEKS0DG2EG20CQVX6FV0',true),

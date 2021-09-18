@@ -1,4 +1,5 @@
 -- CREATEと逆順
+DROP TABLE IF EXISTS `gpas`;
 DROP TABLE IF EXISTS `unread_announcements`;
 DROP TABLE IF EXISTS `announcements`;
 DROP TABLE IF EXISTS `submissions`;
@@ -30,6 +31,10 @@ CREATE TABLE `courses`
     `teacher_id`  CHAR(26)                                                      NOT NULL,
     `keywords`    TEXT                                                          NOT NULL,
     `status`      ENUM ('registration', 'in-progress', 'closed')                NOT NULL DEFAULT 'registration',
+    total_score_max INT NOT NULL DEFAULT 0,
+    total_score_min INT NOT NULL DEFAULT 0,
+    total_score_avg DOUBLE NOT NULL DEFAULT 0,
+    total_score_std_dev DOUBLE NOT NULL DEFAULT 0,
     CONSTRAINT FK_courses_teacher_id FOREIGN KEY (`teacher_id`) REFERENCES `users` (`id`)
 );
 
@@ -58,7 +63,7 @@ CREATE TABLE `submissions`
 (
     `user_id`   CHAR(26)     NOT NULL,
     `class_id`  CHAR(26)     NOT NULL,
-    `file_name` VARCHAR(255) NOT NULL,
+    `file_name` VARCHAR(255) NOT NULL DEFAULT '',
     `score`     TINYINT UNSIGNED,
     PRIMARY KEY (`user_id`, `class_id`),
     CONSTRAINT FK_submissions_user_id FOREIGN KEY (`user_id`) REFERENCES `users` (`id`),
@@ -82,4 +87,13 @@ CREATE TABLE `unread_announcements`
     PRIMARY KEY (`announcement_id`, `user_id`),
     CONSTRAINT FK_unread_announcements_announcement_id FOREIGN KEY (`announcement_id`) REFERENCES `announcements` (`id`),
     CONSTRAINT FK_unread_announcements_user_id FOREIGN KEY (`user_id`) REFERENCES `users` (`id`)
+);
+
+CREATE TABLE `gpas`
+(
+    `user_id` CHAR(26) PRIMARY KEY,
+    `credits` INT NOT NULL, -- 総獲得単位数
+    `total_score` INT NOT NULL,
+    `gpa` DOUBLE AS (IF(credits = 0, 0.0, total_score / 100 / credits)) STORED,
+    CONSTRAINT FK_gpas_user_id FOREIGN KEY (`user_id`) REFERENCES `users` (`id`)
 );

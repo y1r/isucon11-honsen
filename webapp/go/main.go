@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -14,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/go-redis/redis/v8"
 	"github.com/go-sql-driver/mysql"
 	"github.com/gorilla/sessions"
 	"github.com/jmoiron/sqlx"
@@ -35,13 +37,17 @@ type handlers struct {
 	DB *sqlx.DB
 }
 
+var rds *redis.Client
+
 func main() {
+	http.DefaultTransport.(*http.Transport).MaxIdleConnsPerHost = 1000
+
 	e := echo.New()
 	e.Debug = GetEnv("DEBUG", "") == "true"
 	e.Server.Addr = fmt.Sprintf(":%v", GetEnv("PORT", "7000"))
 	e.HideBanner = true
 
-	e.Use(middleware.Logger())
+	//e.Use(middleware.Logger())
 	e.Use(middleware.Recover())
 	e.Use(session.Middleware(sessions.NewCookieStore([]byte("trapnomura"))))
 
@@ -85,6 +91,12 @@ func main() {
 		}
 	}
 
+	rds = redis.NewClient(&redis.Options{
+		Addr:     GetEnv("REDIS_ADDRPORT", "localhost:6379"),
+		Password: "",
+		DB:       0,
+	})
+
 	e.Logger.Error(e.StartServer(e.Server))
 }
 
@@ -95,6 +107,8 @@ type InitializeResponse struct {
 // Initialize POST /initialize 初期化エンドポイント
 func (h *handlers) Initialize(c echo.Context) error {
 	dbForInit, _ := GetDB(true)
+
+	rds.FlushAll(context.TODO())
 
 	files := []string{
 		"1_schema.sql",
@@ -113,6 +127,25 @@ func (h *handlers) Initialize(c echo.Context) error {
 		}
 	}
 
+	// gpaの初期値計算
+	var users []User
+	query := "SELECT `users`.* FROM `users` WHERE type = 'student'"
+	if err := h.DB.Select(&users, query); err != nil {
+		c.Logger().Error(err)
+		return c.NoContent(http.StatusInternalServerError)
+	}
+
+	// サンプルSQLでは、履修者がいる講義でクローズされたものがないため、すべて0で初期化でOK
+	bulkargs := []string{}
+	for _, user := range users {
+		bulkargs = append(bulkargs, fmt.Sprintf("('%s', 0, 0)", user.ID))
+	}
+	query = "INSERT INTO gpas(user_id, credits, total_score) VALUES " + strings.Join(bulkargs, ",")
+	if _, err := h.DB.Exec(query); err != nil {
+		c.Logger().Error(err)
+		return c.NoContent(http.StatusInternalServerError)
+	}
+
 	if err := exec.Command("rm", "-rf", AssignmentsDirectory).Run(); err != nil {
 		c.Logger().Error(err)
 		return c.NoContent(http.StatusInternalServerError)
@@ -120,6 +153,21 @@ func (h *handlers) Initialize(c echo.Context) error {
 	if err := exec.Command("cp", "-r", InitDataDirectory, AssignmentsDirectory).Run(); err != nil {
 		c.Logger().Error(err)
 		return c.NoContent(http.StatusInternalServerError)
+	}
+
+	var readAnnouncements []UnreadAnnouncement
+	if err := h.DB.Select(&readAnnouncements, "SELECT announcement_id, user_id from unread_announcements"); err != nil {
+		for _, announcement := range readAnnouncements {
+			_, err = rds.SAdd(context.TODO(), announcement.UserID, announcement.AnnouncementID).Result()
+			if err != nil {
+				c.Logger().Error(err)
+				return c.NoContent(http.StatusInternalServerError)
+			}
+		}
+		if err != nil {
+			c.Logger().Error(err)
+			return c.NoContent(http.StatusInternalServerError)
+		}
 	}
 
 	res := InitializeResponse{
@@ -243,6 +291,11 @@ type Course struct {
 	TeacherID   string       `db:"teacher_id"`
 	Keywords    string       `db:"keywords"`
 	Status      CourseStatus `db:"status"`
+
+	TotalScoreAvg    float64 `db:"total_score_avg"`
+	TotalScoreMax    int     `db:"total_score_max"`
+	TotalScoreMin    int     `db:"total_score_min"`
+	TotalScoreStdDev float64 `db:"total_score_std_dev"`
 }
 
 // ---------- Public API ----------
@@ -622,31 +675,54 @@ func (h *handlers) GetGrades(c echo.Context) error {
 			}
 		}
 
-		// この科目を履修している学生のTotalScore一覧を取得
-		var totals []int
-		query := "SELECT IFNULL(SUM(`submissions`.`score`), 0) AS `total_score`" +
-			" FROM `users`" +
-			" JOIN `registrations` ON `users`.`id` = `registrations`.`user_id`" +
-			" JOIN `courses` ON `registrations`.`course_id` = `courses`.`id`" +
-			" LEFT JOIN `classes` ON `courses`.`id` = `classes`.`course_id`" +
-			" LEFT JOIN `submissions` ON `users`.`id` = `submissions`.`user_id` AND `submissions`.`class_id` = `classes`.`id`" +
-			" WHERE `courses`.`id` = ?" +
-			" GROUP BY `users`.`id`"
-		if err := h.DB.Select(&totals, query, course.ID); err != nil {
-			c.Logger().Error(err)
-			return c.NoContent(http.StatusInternalServerError)
-		}
+		if course.Status == StatusClosed {
 
-		courseResults = append(courseResults, CourseResult{
-			Name:             course.Name,
-			Code:             course.Code,
-			TotalScore:       myTotalScore,
-			TotalScoreTScore: tScoreInt(myTotalScore, totals),
-			TotalScoreAvg:    averageInt(totals, 0),
-			TotalScoreMax:    maxInt(totals, 0),
-			TotalScoreMin:    minInt(totals, 0),
-			ClassScores:      classScores,
-		})
+			var tScore float64
+			if course.TotalScoreStdDev == 0 {
+				tScore = 50
+			} else {
+				tScore = (float64(myTotalScore)-course.TotalScoreAvg)/course.TotalScoreStdDev*10 + 50
+			}
+
+			courseResults = append(courseResults, CourseResult{
+				Name:             course.Name,
+				Code:             course.Code,
+				TotalScore:       myTotalScore,
+				TotalScoreTScore: tScore,
+				TotalScoreAvg:    course.TotalScoreAvg,
+				TotalScoreMax:    course.TotalScoreMax,
+				TotalScoreMin:    course.TotalScoreMin,
+				ClassScores:      classScores,
+			})
+
+		} else {
+			// この科目を履修している学生のTotalScore一覧を取得
+			var totals []int
+			query := "SELECT IFNULL(SUM(`submissions`.`score`), 0) AS `total_score`" +
+				" FROM `users`" +
+				" JOIN `registrations` ON `users`.`id` = `registrations`.`user_id`" +
+				" JOIN `courses` ON `registrations`.`course_id` = `courses`.`id`" +
+				" LEFT JOIN `classes` ON `courses`.`id` = `classes`.`course_id`" +
+				" LEFT JOIN `submissions` ON `users`.`id` = `submissions`.`user_id` AND `submissions`.`class_id` = `classes`.`id`" +
+				" WHERE `courses`.`id` = ?" +
+				" GROUP BY `users`.`id`"
+			if err := h.DB.Select(&totals, query, course.ID); err != nil {
+				c.Logger().Error(err)
+				return c.NoContent(http.StatusInternalServerError)
+			}
+
+			courseResults = append(courseResults, CourseResult{
+				Name:             course.Name,
+				Code:             course.Code,
+				TotalScore:       myTotalScore,
+				TotalScoreTScore: tScoreInt(myTotalScore, totals),
+				TotalScoreAvg:    averageInt(totals, 0),
+				TotalScoreMax:    maxInt(totals, 0),
+				TotalScoreMin:    minInt(totals, 0),
+				ClassScores:      classScores,
+			})
+
+		}
 
 		// 自分のGPA計算
 		if course.Status == StatusClosed {
@@ -658,37 +734,45 @@ func (h *handlers) GetGrades(c echo.Context) error {
 		myGPA = myGPA / 100 / float64(myCredits)
 	}
 
+	type Toukeichi struct {
+		GpaAvg    float64 `db:"gpa_avg"`
+		GpaMax    float64 `db:"gpa_max"`
+		GpaMin    float64 `db:"gpa_min"`
+		GpaStdDev float64 `db:"gpa_std_dev"`
+	}
+	var toukeichi Toukeichi
+
 	// GPAの統計値
 	// 一つでも修了した科目がある学生のGPA一覧
-	var gpas []float64
-	query = "SELECT IFNULL(SUM(`submissions`.`score` * `courses`.`credit`), 0) / 100 / `credits`.`credits` AS `gpa`" +
-		" FROM `users`" +
-		" JOIN (" +
-		"     SELECT `users`.`id` AS `user_id`, SUM(`courses`.`credit`) AS `credits`" +
-		"     FROM `users`" +
-		"     JOIN `registrations` ON `users`.`id` = `registrations`.`user_id`" +
-		"     JOIN `courses` ON `registrations`.`course_id` = `courses`.`id` AND `courses`.`status` = ?" +
-		"     GROUP BY `users`.`id`" +
-		" ) AS `credits` ON `credits`.`user_id` = `users`.`id`" +
-		" JOIN `registrations` ON `users`.`id` = `registrations`.`user_id`" +
-		" JOIN `courses` ON `registrations`.`course_id` = `courses`.`id` AND `courses`.`status` = ?" +
-		" LEFT JOIN `classes` ON `courses`.`id` = `classes`.`course_id`" +
-		" LEFT JOIN `submissions` ON `users`.`id` = `submissions`.`user_id` AND `submissions`.`class_id` = `classes`.`id`" +
-		" WHERE `users`.`type` = ?" +
-		" GROUP BY `users`.`id`"
-	if err := h.DB.Select(&gpas, query, StatusClosed, StatusClosed, Student); err != nil {
+	query = `
+		SELECT
+			COALESCE(AVG(gpa), 0) AS gpa_avg,
+			COALESCE(MAX(gpa), 0) AS gpa_max,
+			COALESCE(MIN(gpa), 0) AS gpa_min,
+			COALESCE(STDDEV(gpa), 0) AS gpa_std_dev
+		FROM gpas
+		WHERE credits > 0
+	`
+	if err := h.DB.Get(&toukeichi, query); err != nil {
 		c.Logger().Error(err)
 		return c.NoContent(http.StatusInternalServerError)
+	}
+
+	var tScore float64
+	if toukeichi.GpaStdDev == 0 {
+		tScore = 50
+	} else {
+		tScore = (myGPA-toukeichi.GpaAvg)/toukeichi.GpaStdDev*10 + 50
 	}
 
 	res := GetGradeResponse{
 		Summary: Summary{
 			Credits:   myCredits,
 			GPA:       myGPA,
-			GpaTScore: tScoreFloat64(myGPA, gpas),
-			GpaAvg:    averageFloat64(gpas, 0),
-			GpaMax:    maxFloat64(gpas, 0),
-			GpaMin:    minFloat64(gpas, 0),
+			GpaTScore: tScore,
+			GpaAvg:    toukeichi.GpaAvg,
+			GpaMax:    toukeichi.GpaMax,
+			GpaMin:    toukeichi.GpaMin,
 		},
 		CourseResults: courseResults,
 	}
@@ -700,7 +784,7 @@ func (h *handlers) GetGrades(c echo.Context) error {
 
 // SearchCourses GET /api/courses 科目検索
 func (h *handlers) SearchCourses(c echo.Context) error {
-	query := "SELECT `courses`.*, `users`.`name` AS `teacher`" +
+	query := "SELECT `courses`.`id`, `courses`.`code`, `courses`.`type`, `courses`.`name`, `courses`.`description`, `courses`.`credit`, `courses`.`period`, `courses`.`day_of_week`, `courses`.`teacher_id`, `courses`.`keywords`, `courses`.`status`, `users`.`name` AS `teacher`" +
 		" FROM `courses` JOIN `users` ON `courses`.`teacher_id` = `users`.`id`" +
 		" WHERE 1=1"
 	var condition string
@@ -885,7 +969,7 @@ func (h *handlers) GetCourseDetail(c echo.Context) error {
 	courseID := c.Param("courseID")
 
 	var res GetCourseDetailResponse
-	query := "SELECT `courses`.*, `users`.`name` AS `teacher`" +
+	query := "SELECT `courses`.`id`, `courses`.`code`, `courses`.`type`, `courses`.`name`, `courses`.`description`, `courses`.`credit`, `courses`.`period`, `courses`.`day_of_week`, `courses`.`teacher_id`, `courses`.`keywords`, `courses`.`status`, `users`.`name` AS `teacher`" +
 		" FROM `courses`" +
 		" JOIN `users` ON `courses`.`teacher_id` = `users`.`id`" +
 		" WHERE `courses`.`id` = ?"
@@ -928,9 +1012,85 @@ func (h *handlers) SetCourseStatus(c echo.Context) error {
 		return c.String(http.StatusNotFound, "No such course.")
 	}
 
+	var course Course
+	if err := tx.Get(&course, "SELECT * FROM `courses` WHERE `id` = ? FOR UPDATE", courseID); err != nil && err != sql.ErrNoRows {
+		c.Logger().Error(err)
+		return c.NoContent(http.StatusInternalServerError)
+	}
+
 	if _, err := tx.Exec("UPDATE `courses` SET `status` = ? WHERE `id` = ?", req.Status, courseID); err != nil {
 		c.Logger().Error(err)
 		return c.NoContent(http.StatusInternalServerError)
+	}
+
+	if req.Status == StatusClosed {
+		type UserWithScore struct {
+			User
+			TotalScore int `db:"total_score"`
+		}
+
+		var targets []UserWithScore
+		query := `
+			SELECT
+				users.*,
+				SUM(submissions.score) AS total_score
+			FROM users
+			INNER JOIN registrations
+				ON registrations.user_id = users.id
+				AND registrations.course_id = ?
+			INNER JOIN classes
+				ON classes.course_id = registrations.course_id
+			INNER JOIN submissions
+				ON submissions.class_id = classes.id
+				AND submissions.user_id = users.id
+			GROUP BY users.id
+			FOR UPDATE
+		`
+		if err := tx.Select(&targets, query, courseID); err != nil {
+			c.Logger().Error(err)
+			return c.NoContent(http.StatusInternalServerError)
+		}
+
+		if len(targets) > 0 {
+			query = "INSERT INTO gpas(user_id, credits, total_score) VALUES "
+			strArgs := []string{}
+			for _, target := range targets {
+				strArgs = append(
+					strArgs,
+					fmt.Sprintf("('%s', %d, %d)", target.User.ID, course.Credit, target.TotalScore*int(course.Credit)),
+				)
+			}
+			query += strings.Join(strArgs, ", ")
+			query += " ON DUPLICATE KEY UPDATE credits = credits + VALUES(credits), total_score = total_score + VALUES(total_score)"
+			if _, err = tx.Exec(query); err != nil {
+				c.Logger().Error(err)
+				return c.NoContent(http.StatusInternalServerError)
+			}
+		}
+
+		//
+
+		totals := []int{}
+		for _, target := range targets {
+			totals = append(totals, target.TotalScore)
+		}
+
+		totalScoreMax := maxInt(totals, 0)
+		totalScoreMin := minInt(totals, 0)
+		totalScoreAvg := averageInt(totals, 0)
+		totalScoreStdDev := stdDevInt(totals, totalScoreAvg)
+
+		if _, err := tx.Exec(
+			"UPDATE `courses` SET `total_score_max` = ?, `total_score_min` = ?, `total_score_avg` = ?, `total_score_std_dev` = ? WHERE `id` = ?",
+			totalScoreMax,
+			totalScoreMin,
+			totalScoreAvg,
+			totalScoreStdDev,
+			courseID,
+		); err != nil {
+			c.Logger().Error(err)
+			return c.NoContent(http.StatusInternalServerError)
+		}
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -970,15 +1130,8 @@ func (h *handlers) GetClasses(c echo.Context) error {
 
 	courseID := c.Param("courseID")
 
-	tx, err := h.DB.Beginx()
-	if err != nil {
-		c.Logger().Error(err)
-		return c.NoContent(http.StatusInternalServerError)
-	}
-	defer tx.Rollback()
-
 	var count int
-	if err := tx.Get(&count, "SELECT COUNT(*) FROM `courses` WHERE `id` = ?", courseID); err != nil {
+	if err := h.DB.Get(&count, "SELECT COUNT(*) FROM `courses` WHERE `id` = ?", courseID); err != nil {
 		c.Logger().Error(err)
 		return c.NoContent(http.StatusInternalServerError)
 	}
@@ -992,12 +1145,7 @@ func (h *handlers) GetClasses(c echo.Context) error {
 		" LEFT JOIN `submissions` ON `classes`.`id` = `submissions`.`class_id` AND `submissions`.`user_id` = ?" +
 		" WHERE `classes`.`course_id` = ?" +
 		" ORDER BY `classes`.`part`"
-	if err := tx.Select(&classes, query, userID, courseID); err != nil {
-		c.Logger().Error(err)
-		return c.NoContent(http.StatusInternalServerError)
-	}
-
-	if err := tx.Commit(); err != nil {
+	if err := h.DB.Select(&classes, query, userID, courseID); err != nil {
 		c.Logger().Error(err)
 		return c.NoContent(http.StatusInternalServerError)
 	}
@@ -1195,8 +1343,39 @@ func (h *handlers) RegisterScores(c echo.Context) error {
 		return c.String(http.StatusBadRequest, "Invalid format.")
 	}
 
-	for _, score := range req {
-		if _, err := tx.Exec("UPDATE `submissions` JOIN `users` ON `users`.`id` = `submissions`.`user_id` SET `score` = ? WHERE `users`.`code` = ? AND `class_id` = ?", score.Score, score.UserCode, classID); err != nil {
+	if 0 < len(req) {
+		stmt := "SELECT `id`, `code` FROM users where code in (%s)"
+		userCodes := []string{}
+
+		for _, score := range req {
+			userCodes = append(userCodes, "\""+score.UserCode+"\"")
+		}
+		stmt = fmt.Sprintf(stmt, strings.Join(userCodes, ","))
+
+		var users []User
+		err = tx.Select(&users, stmt)
+		if err != nil {
+			c.Logger().Error(err)
+			return c.NoContent(http.StatusInternalServerError)
+		}
+
+		userCode2id := map[string]string{}
+		for _, user := range users {
+			userCode2id[user.Code] = user.ID
+		}
+
+		valueStrings := []string{}
+		valueArgs := [](interface{}){}
+
+		for _, score := range req {
+			valueStrings = append(valueStrings, "(?, ?, ?)")
+			valueArgs = append(valueArgs, userCode2id[score.UserCode])
+			valueArgs = append(valueArgs, classID)
+			valueArgs = append(valueArgs, score.Score)
+		}
+
+		replaceStmt := fmt.Sprintf("INSERT INTO `submissions` (user_id, class_id, score) VALUES %s ON DUPLICATE KEY UPDATE user_id = VALUES(user_id), class_id = VALUES(class_id), score = VALUES(score), file_name = file_name", strings.Join(valueStrings, ","))
+		if _, err := tx.Exec(replaceStmt, valueArgs...); err != nil {
 			c.Logger().Error(err)
 			return c.NoContent(http.StatusInternalServerError)
 		}
@@ -1311,20 +1490,13 @@ func (h *handlers) GetAnnouncementList(c echo.Context) error {
 		return c.NoContent(http.StatusInternalServerError)
 	}
 
-	tx, err := h.DB.Beginx()
-	if err != nil {
-		c.Logger().Error(err)
-		return c.NoContent(http.StatusInternalServerError)
-	}
-	defer tx.Rollback()
-
 	var announcements []AnnouncementWithoutDetail
 	var args []interface{}
-	query := "SELECT `announcements`.`id`, `courses`.`id` AS `course_id`, `courses`.`name` AS `course_name`, `announcements`.`title`, NOT `unread_announcements`.`is_deleted` AS `unread`" +
+	// TODO: mark is_deleted by application
+	query := "SELECT `announcements`.`id`, `courses`.`id` AS `course_id`, `courses`.`name` AS `course_name`, `announcements`.`title`" +
 		" FROM `announcements`" +
 		" JOIN `courses` ON `announcements`.`course_id` = `courses`.`id`" +
 		" JOIN `registrations` ON `courses`.`id` = `registrations`.`course_id`" +
-		" JOIN `unread_announcements` ON `announcements`.`id` = `unread_announcements`.`announcement_id`" +
 		" WHERE 1=1"
 
 	if courseID := c.QueryParam("course_id"); courseID != "" {
@@ -1332,11 +1504,10 @@ func (h *handlers) GetAnnouncementList(c echo.Context) error {
 		args = append(args, courseID)
 	}
 
-	query += " AND `unread_announcements`.`user_id` = ?" +
-		" AND `registrations`.`user_id` = ?" +
+	query += " AND `registrations`.`user_id` = ?" +
 		" ORDER BY `announcements`.`id` DESC" +
 		" LIMIT ? OFFSET ?"
-	args = append(args, userID, userID)
+	args = append(args, userID)
 
 	var page int
 	if c.QueryParam("page") == "" {
@@ -1352,13 +1523,38 @@ func (h *handlers) GetAnnouncementList(c echo.Context) error {
 	// limitより多く上限を設定し、実際にlimitより多くレコードが取得できた場合は次のページが存在する
 	args = append(args, limit+1, offset)
 
+	tx, err := h.DB.Beginx()
+	if err != nil {
+		c.Logger().Error(err)
+		return c.NoContent(http.StatusInternalServerError)
+	}
+	defer tx.Rollback()
+
 	if err := tx.Select(&announcements, query, args...); err != nil {
 		c.Logger().Error(err)
 		return c.NoContent(http.StatusInternalServerError)
 	}
 
-	var unreadCount int
-	if err := tx.Get(&unreadCount, "SELECT COUNT(*) FROM `unread_announcements` WHERE `user_id` = ? AND NOT `is_deleted`", userID); err != nil {
+	for i := range announcements {
+		read, err := rds.SIsMember(context.TODO(), userID, announcements[i].ID).Result()
+		if err != nil {
+			c.Logger().Error(err)
+			return c.NoContent(http.StatusInternalServerError)
+		}
+		announcements[i].Unread = !read
+	}
+
+	var shouldBeRead int
+	query2 := "SELECT COUNT(*) FROM `announcements` " +
+		" JOIN `courses` ON `announcements`.`course_id` = `courses`.`id`" +
+		" JOIN `registrations` ON `courses`.`id` = `registrations`.`course_id` AND `registrations`.`user_id` = ?"
+	if err := tx.Get(&shouldBeRead, query2, userID); err != nil {
+		c.Logger().Error(err)
+		return c.NoContent(http.StatusInternalServerError)
+	}
+
+	readCount, err := rds.SCard(context.TODO(), userID).Result()
+	if err != nil {
 		c.Logger().Error(err)
 		return c.NoContent(http.StatusInternalServerError)
 	}
@@ -1398,7 +1594,7 @@ func (h *handlers) GetAnnouncementList(c echo.Context) error {
 	announcementsRes := append(make([]AnnouncementWithoutDetail, 0, len(announcements)), announcements...)
 
 	return c.JSON(http.StatusOK, GetAnnouncementsResponse{
-		UnreadCount:   unreadCount,
+		UnreadCount:   shouldBeRead - int(readCount),
 		Announcements: announcementsRes,
 	})
 }
@@ -1458,28 +1654,17 @@ func (h *handlers) AddAnnouncement(c echo.Context) error {
 		return c.NoContent(http.StatusInternalServerError)
 	}
 
-	var targets []User
-	query := "SELECT `users`.* FROM `users`" +
-		" JOIN `registrations` ON `users`.`id` = `registrations`.`user_id`" +
-		" WHERE `registrations`.`course_id` = ?"
-	if err := tx.Select(&targets, query, req.CourseID); err != nil {
-		c.Logger().Error(err)
-		return c.NoContent(http.StatusInternalServerError)
-	}
-
-	for _, user := range targets {
-		if _, err := tx.Exec("INSERT INTO `unread_announcements` (`announcement_id`, `user_id`) VALUES (?, ?)", req.ID, user.ID); err != nil {
-			c.Logger().Error(err)
-			return c.NoContent(http.StatusInternalServerError)
-		}
-	}
-
 	if err := tx.Commit(); err != nil {
 		c.Logger().Error(err)
 		return c.NoContent(http.StatusInternalServerError)
 	}
 
 	return c.NoContent(http.StatusCreated)
+}
+
+type UnreadAnnouncement struct {
+	AnnouncementID string `db:"announcement_id"`
+	UserID         string `db:"user_id"`
 }
 
 type AnnouncementDetail struct {
@@ -1509,12 +1694,13 @@ func (h *handlers) GetAnnouncementDetail(c echo.Context) error {
 	defer tx.Rollback()
 
 	var announcement AnnouncementDetail
-	query := "SELECT `announcements`.`id`, `courses`.`id` AS `course_id`, `courses`.`name` AS `course_name`, `announcements`.`title`, `announcements`.`message`, NOT `unread_announcements`.`is_deleted` AS `unread`" +
+	query := "SELECT `announcements`.`id`, `courses`.`id` AS `course_id`, `courses`.`name` AS `course_name`, `announcements`.`title`, `announcements`.`message`" +
 		" FROM `announcements`" +
 		" JOIN `courses` ON `courses`.`id` = `announcements`.`course_id`" +
-		" JOIN `unread_announcements` ON `unread_announcements`.`announcement_id` = `announcements`.`id`" +
+		" JOIN `registrations` ON `courses`.`id` = `registrations`.`course_id` " +
 		" WHERE `announcements`.`id` = ?" +
-		" AND `unread_announcements`.`user_id` = ?"
+		" AND `registrations`.`user_id` = ?"
+
 	if err := tx.Get(&announcement, query, announcementID, userID); err != nil && err != sql.ErrNoRows {
 		c.Logger().Error(err)
 		return c.NoContent(http.StatusInternalServerError)
@@ -1531,7 +1717,8 @@ func (h *handlers) GetAnnouncementDetail(c echo.Context) error {
 		return c.String(http.StatusNotFound, "No such announcement.")
 	}
 
-	if _, err := tx.Exec("UPDATE `unread_announcements` SET `is_deleted` = true WHERE `announcement_id` = ? AND `user_id` = ?", announcementID, userID); err != nil {
+	inserted, err := rds.SAdd(context.TODO(), userID, announcementID).Result()
+	if err != nil {
 		c.Logger().Error(err)
 		return c.NoContent(http.StatusInternalServerError)
 	}
@@ -1540,6 +1727,8 @@ func (h *handlers) GetAnnouncementDetail(c echo.Context) error {
 		c.Logger().Error(err)
 		return c.NoContent(http.StatusInternalServerError)
 	}
+
+	announcement.Unread = inserted == 1
 
 	return c.JSON(http.StatusOK, announcement)
 }
