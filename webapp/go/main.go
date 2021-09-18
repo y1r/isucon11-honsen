@@ -663,9 +663,21 @@ func (h *handlers) GetGrades(c echo.Context) error {
 		var myTotalScore int
 		for _, class := range classes {
 			var submissionsCount int
-			if err := h.DB.Get(&submissionsCount, "SELECT COUNT(*) FROM `submissions` WHERE `class_id` = ?", class.ID); err != nil {
-				c.Logger().Error(err)
-				return c.NoContent(http.StatusInternalServerError)
+
+			submitNumCacheMutex.RLock()
+			v, ok := submitNumCache[class.ID]
+			submitNumCacheMutex.RUnlock()
+			if ok {
+				submissionsCount = v
+			} else {
+				if err := h.DB.Get(&submissionsCount, "SELECT COUNT(*) FROM `submissions` WHERE `class_id` = ?", class.ID); err != nil {
+					c.Logger().Error(err)
+					return c.NoContent(http.StatusInternalServerError)
+				}
+
+				submitNumCacheMutex.Lock()
+				submitNumCache[class.ID] = submissionsCount
+				submitNumCacheMutex.Unlock()
 			}
 
 			if class.SubmissionScore != nil {
@@ -1237,7 +1249,7 @@ func (h *handlers) AddClass(c echo.Context) error {
 }
 
 var submitNumCache map[string]int
-var submitNumCacheMutex sync.Mutex
+var submitNumCacheMutex sync.RWMutex
 
 // SubmitAssignment POST /api/courses/:courseID/classes/:classID/assignments 課題の提出
 func (h *handlers) SubmitAssignment(c echo.Context) error {
