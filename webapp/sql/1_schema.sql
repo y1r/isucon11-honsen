@@ -90,6 +90,6 @@ CREATE TABLE `gpas`
     `user_id` CHAR(26) PRIMARY KEY,
     `credits` INT NOT NULL, -- 総獲得単位数
     `total_score` INT NOT NULL,
-    `gpa` DOUBLE AS (IF(credits = 0, 0.0, total_score / 100.0 / credits)) STORED,
+    `gpa` DOUBLE AS (IF(credits = 0, 0.0, total_score / 100 / credits)) STORED,
     CONSTRAINT FK_gpas_user_id FOREIGN KEY (`user_id`) REFERENCES `users` (`id`)
 );
