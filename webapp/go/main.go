@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -13,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/go-redis/redis/v8"
 	"github.com/go-sql-driver/mysql"
 	"github.com/gorilla/sessions"
 	"github.com/jmoiron/sqlx"
@@ -34,6 +36,7 @@ type handlers struct {
 	DB *sqlx.DB
 }
 
+var rds *redis.Client
 func main() {
 	http.DefaultTransport.(*http.Transport).MaxIdleConnsPerHost = 1000
 
@@ -86,6 +89,12 @@ func main() {
 		}
 	}
 
+	rds = redis.NewClient(&redis.Options{
+		Addr: GetEnv("REDIS_ADDRPORT", "localhost:6379"),
+		Password: "",
+		DB: 0,
+	})
+
 	e.Logger.Error(e.StartServer(e.Server))
 }
 
@@ -96,6 +105,8 @@ type InitializeResponse struct {
 // Initialize POST /initialize 初期化エンドポイント
 func (h *handlers) Initialize(c echo.Context) error {
 	dbForInit, _ := GetDB(true)
+
+	rds.FlushAll(context.TODO())
 
 	files := []string{
 		"1_schema.sql",
@@ -121,6 +132,23 @@ func (h *handlers) Initialize(c echo.Context) error {
 	if err := exec.Command("cp", "-r", InitDataDirectory, AssignmentsDirectory).Run(); err != nil {
 		c.Logger().Error(err)
 		return c.NoContent(http.StatusInternalServerError)
+	}
+
+	var readAnnouncements []UnreadAnnouncement
+	if err := h.DB.Select(&readAnnouncements, "SELECT announcement_id, user_id from unread_announcements"); err != nil {
+		pipe := rds.Pipeline()
+		for _, announcement := range readAnnouncements {
+			_, err = pipe.SAdd(context.TODO(), announcement.UserID, announcement.AnnouncementID).Result()
+			if err != nil {
+				c.Logger().Error(err)
+				return c.NoContent(http.StatusInternalServerError)
+			}
+		}
+		err := pipe.Close()
+		if err != nil {
+			c.Logger().Error(err)
+			return c.NoContent(http.StatusInternalServerError)
+		}
 	}
 
 	res := InitializeResponse{
@@ -1300,21 +1328,13 @@ func (h *handlers) GetAnnouncementList(c echo.Context) error {
 		return c.NoContent(http.StatusInternalServerError)
 	}
 
-	tx, err := h.DB.Beginx()
-	if err != nil {
-		c.Logger().Error(err)
-		return c.NoContent(http.StatusInternalServerError)
-	}
-	defer tx.Rollback()
-
 	var announcements []AnnouncementWithoutDetail
 	var args []interface{}
 	// TODO: mark is_deleted by application
-	query := "SELECT `announcements`.`id`, `courses`.`id` AS `course_id`, `courses`.`name` AS `course_name`, `announcements`.`title`, `unread_announcements`.`is_deleted` IS NULL AS `unread`" +
+	query := "SELECT `announcements`.`id`, `courses`.`id` AS `course_id`, `courses`.`name` AS `course_name`, `announcements`.`title`" +
 		" FROM `announcements`" +
 		" JOIN `courses` ON `announcements`.`course_id` = `courses`.`id`" +
 		" JOIN `registrations` ON `courses`.`id` = `registrations`.`course_id`" +
-		" LEFT JOIN `unread_announcements` ON `announcements`.`id` = `unread_announcements`.`announcement_id` AND `unread_announcements`.`user_id` = `registrations`.`user_id` " +
 		" WHERE 1=1"
 
 	if courseID := c.QueryParam("course_id"); courseID != "" {
@@ -1341,12 +1361,29 @@ func (h *handlers) GetAnnouncementList(c echo.Context) error {
 	// limitより多く上限を設定し、実際にlimitより多くレコードが取得できた場合は次のページが存在する
 	args = append(args, limit+1, offset)
 
+	tx, err := h.DB.Beginx()
+	if err != nil {
+		c.Logger().Error(err)
+		return c.NoContent(http.StatusInternalServerError)
+	}
+	defer tx.Rollback()
+
 	if err := tx.Select(&announcements, query, args...); err != nil {
 		c.Logger().Error(err)
 		return c.NoContent(http.StatusInternalServerError)
 	}
 
-	var shouldBeRead, readCount int
+	pipe := rds.Pipeline()
+	for i := range announcements {
+		read, err := pipe.SIsMember(context.TODO(), userID, announcements[i].ID).Result()
+		if err != nil {
+			c.Logger().Error(err)
+			return c.NoContent(http.StatusInternalServerError)
+		}
+		announcements[i].Unread = !read
+	}
+
+	var shouldBeRead int
 	query2 := "SELECT COUNT(*) FROM `announcements` " +
 		" JOIN `courses` ON `announcements`.`course_id` = `courses`.`id`" +
 		" JOIN `registrations` ON `courses`.`id` = `registrations`.`course_id` AND `registrations`.`user_id` = ?"
@@ -1355,13 +1392,18 @@ func (h *handlers) GetAnnouncementList(c echo.Context) error {
 		return c.NoContent(http.StatusInternalServerError)
 	}
 
-	// TODO: redis
-	if err := tx.Get(&readCount, "SELECT COUNT(*) FROM `unread_announcements` WHERE `user_id` = ?", userID); err != nil {
+	if err := tx.Commit(); err != nil {
 		c.Logger().Error(err)
 		return c.NoContent(http.StatusInternalServerError)
 	}
 
-	if err := tx.Commit(); err != nil {
+	readCount, err := pipe.SCard(context.TODO(), userID).Result()
+	if err != nil {
+		c.Logger().Error(err)
+		return c.NoContent(http.StatusInternalServerError)
+	}
+	err = pipe.Close()
+	if err != nil {
 		c.Logger().Error(err)
 		return c.NoContent(http.StatusInternalServerError)
 	}
@@ -1396,7 +1438,7 @@ func (h *handlers) GetAnnouncementList(c echo.Context) error {
 	announcementsRes := append(make([]AnnouncementWithoutDetail, 0, len(announcements)), announcements...)
 
 	return c.JSON(http.StatusOK, GetAnnouncementsResponse{
-		UnreadCount:   shouldBeRead - readCount,
+		UnreadCount:   shouldBeRead - int(readCount),
 		Announcements: announcementsRes,
 	})
 }
@@ -1464,6 +1506,11 @@ func (h *handlers) AddAnnouncement(c echo.Context) error {
 	return c.NoContent(http.StatusCreated)
 }
 
+type UnreadAnnouncement struct {
+	AnnouncementID string `db:"announcement_id"`
+	UserID string `db:"user_id"`
+}
+
 type AnnouncementDetail struct {
 	ID         string `json:"id" db:"id"`
 	CourseID   string `json:"course_id" db:"course_id"`
@@ -1491,11 +1538,10 @@ func (h *handlers) GetAnnouncementDetail(c echo.Context) error {
 	defer tx.Rollback()
 
 	var announcement AnnouncementDetail
-	query := "SELECT `announcements`.`id`, `courses`.`id` AS `course_id`, `courses`.`name` AS `course_name`, `announcements`.`title`, `announcements`.`message`, `unread_announcements`.`is_deleted` IS NULL AS `unread`" +
+	query := "SELECT `announcements`.`id`, `courses`.`id` AS `course_id`, `courses`.`name` AS `course_name`, `announcements`.`title`, `announcements`.`message`" +
 		" FROM `announcements`" +
 		" JOIN `courses` ON `courses`.`id` = `announcements`.`course_id`" +
 		" JOIN `registrations` ON `courses`.`id` = `registrations`.`course_id` " +
-		" LEFT JOIN `unread_announcements` ON `announcements`.`id` = `unread_announcements`.`announcement_id` AND `unread_announcements`.`user_id` = `registrations`.`user_id` " +
 		" WHERE `announcements`.`id` = ?" +
 		" AND `registrations`.`user_id` = ?"
 
@@ -1515,18 +1561,17 @@ func (h *handlers) GetAnnouncementDetail(c echo.Context) error {
 		return c.String(http.StatusNotFound, "No such announcement.")
 	}
 
-	// TODO: rewrite here by redis
-	if announcement.Unread {
-		if _, err := tx.Exec("INSERT INTO `unread_announcements` (`announcement_id`, `user_id`, `is_deleted`) VALUES (?, ?, ?)", announcementID, userID, true); err != nil {
-			c.Logger().Error(err)
-			return c.NoContent(http.StatusInternalServerError)
-		}
-	}
-
 	if err := tx.Commit(); err != nil {
 		c.Logger().Error(err)
 		return c.NoContent(http.StatusInternalServerError)
 	}
+
+	inserted, err := rds.SAdd(context.TODO(), userID, announcementID).Result()
+	if err != nil {
+		c.Logger().Error(err)
+		return c.NoContent(http.StatusInternalServerError)
+	}
+	announcement.Unread = inserted == 1
 
 	return c.JSON(http.StatusOK, announcement)
 }
