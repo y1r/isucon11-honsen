@@ -1290,8 +1290,39 @@ func (h *handlers) RegisterScores(c echo.Context) error {
 		return c.String(http.StatusBadRequest, "Invalid format.")
 	}
 
-	for _, score := range req {
-		if _, err := tx.Exec("UPDATE `submissions` JOIN `users` ON `users`.`id` = `submissions`.`user_id` SET `score` = ? WHERE `users`.`code` = ? AND `class_id` = ?", score.Score, score.UserCode, classID); err != nil {
+	if 0 < len(req) {
+		stmt := "SELECT id, code FROM users where code in (%s)"
+		userCodes := []string{}
+
+		for _, score := range req {
+			userCodes = append(userCodes, score.UserCode)
+		}
+		stmt = fmt.Sprintf(stmt, strings.Join(userCodes, ","))
+
+		var users []User
+		err = tx.Select(&users, stmt)
+		if err != nil {
+			c.Logger().Error(err)
+			return c.NoContent(http.StatusInternalServerError)
+		}
+
+		userCode2id := map[string]string{}
+		for _, user := range users {
+			userCode2id[user.Code] = user.ID
+		}
+
+		valueStrings := []string{}
+		valueArgs := [](interface{}){}
+
+		for _, score := range req {
+			valueStrings = append(valueStrings, "(?, ?, ?)")
+			valueArgs = append(valueArgs, userCode2id[score.UserCode])
+			valueArgs = append(valueArgs, classID)
+			valueArgs = append(valueArgs, score.Score)
+		}
+
+		replaceStmt := fmt.Sprintf("REPLACE INTO `submissions` (user_id, class_id, score) VALUES %s", strings.Join(valueStrings, ","))
+		if _, err := tx.Exec(replaceStmt, valueArgs...); err != nil {
 			c.Logger().Error(err)
 			return c.NoContent(http.StatusInternalServerError)
 		}
