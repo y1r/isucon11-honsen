@@ -1343,11 +1343,11 @@ func (h *handlers) RegisterScores(c echo.Context) error {
 	}
 
 	if 0 < len(req) {
-		stmt := "SELECT id, code FROM users where code in (%s)"
+		stmt := "SELECT `id`, `code` FROM users where code in (%s)"
 		userCodes := []string{}
 
 		for _, score := range req {
-			userCodes = append(userCodes, score.UserCode)
+			userCodes = append(userCodes, "\"" + score.UserCode + "\"")
 		}
 		stmt = fmt.Sprintf(stmt, strings.Join(userCodes, ","))
 
