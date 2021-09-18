@@ -1016,19 +1016,21 @@ func (h *handlers) SetCourseStatus(c echo.Context) error {
 			return c.NoContent(http.StatusInternalServerError)
 		}
 
-		query = "INSERT INTO gpas(user_id, credits, total_score) VALUES "
-		strArgs := []string{}
-		for _, target := range targets {
-			strArgs = append(
-				strArgs,
-				fmt.Sprintf("('%s', %d, %d)", target.User.ID, course.Credit, target.TotalScore*int(course.Credit)),
-			)
-		}
-		query += strings.Join(strArgs, ", ")
-		query += " ON DUPLICATE KEY UPDATE credits = credits + VALUES(credits), total_score = total_score + VALUES(total_score)"
-		if _, err = tx.Exec(query); err != nil {
-			c.Logger().Error(err)
-			return c.NoContent(http.StatusInternalServerError)
+		if len(targets) > 0 {
+			query = "INSERT INTO gpas(user_id, credits, total_score) VALUES "
+			strArgs := []string{}
+			for _, target := range targets {
+				strArgs = append(
+					strArgs,
+					fmt.Sprintf("('%s', %d, %d)", target.User.ID, course.Credit, target.TotalScore*int(course.Credit)),
+				)
+			}
+			query += strings.Join(strArgs, ", ")
+			query += " ON DUPLICATE KEY UPDATE credits = credits + VALUES(credits), total_score = total_score + VALUES(total_score)"
+			if _, err = tx.Exec(query); err != nil {
+				c.Logger().Error(err)
+				return c.NoContent(http.StatusInternalServerError)
+			}
 		}
 	}
 
