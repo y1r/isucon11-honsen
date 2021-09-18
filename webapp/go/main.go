@@ -1310,7 +1310,7 @@ func (h *handlers) GetAnnouncementList(c echo.Context) error {
 	var announcements []AnnouncementWithoutDetail
 	var args []interface{}
 	// TODO: mark is_deleted by application
-	query := "SELECT `announcements`.`id`, `courses`.`id` AS `course_id`, `courses`.`name` AS `course_name`, `announcements`.`title`, NOT IFNULL(`unread_announcements`.`is_deleted`, FALSE) AS `unread`" +
+	query := "SELECT `announcements`.`id`, `courses`.`id` AS `course_id`, `courses`.`name` AS `course_name`, `announcements`.`title`, `unread_announcements`.`is_deleted` IS NULL AS `unread`" +
 		" FROM `announcements`" +
 		" JOIN `courses` ON `announcements`.`course_id` = `courses`.`id`" +
 		" JOIN `registrations` ON `courses`.`id` = `registrations`.`course_id`" +
@@ -1356,7 +1356,7 @@ func (h *handlers) GetAnnouncementList(c echo.Context) error {
 	}
 
 	// TODO: redis
-	if err := tx.Get(&readCount, "SELECT COUNT(*) FROM `unread_announcements` WHERE `user_id` = ? AND is_deleted", userID); err != nil {
+	if err := tx.Get(&readCount, "SELECT COUNT(*) FROM `unread_announcements` WHERE `user_id` = ?", userID); err != nil {
 		c.Logger().Error(err)
 		return c.NoContent(http.StatusInternalServerError)
 	}
@@ -1491,7 +1491,7 @@ func (h *handlers) GetAnnouncementDetail(c echo.Context) error {
 	defer tx.Rollback()
 
 	var announcement AnnouncementDetail
-	query := "SELECT `announcements`.`id`, `courses`.`id` AS `course_id`, `courses`.`name` AS `course_name`, `announcements`.`title`, `announcements`.`message`, NOT IFNULL(`unread_announcements`.`is_deleted`, FALSE) AS `unread`" +
+	query := "SELECT `announcements`.`id`, `courses`.`id` AS `course_id`, `courses`.`name` AS `course_name`, `announcements`.`title`, `announcements`.`message`, `unread_announcements`.`is_deleted` IS NULL AS `unread`" +
 		" FROM `announcements`" +
 		" JOIN `courses` ON `courses`.`id` = `announcements`.`course_id`" +
 		" JOIN `registrations` ON `courses`.`id` = `registrations`.`course_id` " +
