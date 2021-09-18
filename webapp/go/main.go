@@ -290,6 +290,11 @@ type Course struct {
 	TeacherID   string       `db:"teacher_id"`
 	Keywords    string       `db:"keywords"`
 	Status      CourseStatus `db:"status"`
+
+	TotalScoreAvg    float64 `db:"total_score_avg"`
+	TotalScoreMax    int     `db:"total_score_max"`
+	TotalScoreMin    int     `db:"total_score_min"`
+	TotalScoreStdDev float64 `db:"total_score_std_dev"`
 }
 
 // ---------- Public API ----------
@@ -669,31 +674,54 @@ func (h *handlers) GetGrades(c echo.Context) error {
 			}
 		}
 
-		// この科目を履修している学生のTotalScore一覧を取得
-		var totals []int
-		query := "SELECT IFNULL(SUM(`submissions`.`score`), 0) AS `total_score`" +
-			" FROM `users`" +
-			" JOIN `registrations` ON `users`.`id` = `registrations`.`user_id`" +
-			" JOIN `courses` ON `registrations`.`course_id` = `courses`.`id`" +
-			" LEFT JOIN `classes` ON `courses`.`id` = `classes`.`course_id`" +
-			" LEFT JOIN `submissions` ON `users`.`id` = `submissions`.`user_id` AND `submissions`.`class_id` = `classes`.`id`" +
-			" WHERE `courses`.`id` = ?" +
-			" GROUP BY `users`.`id`"
-		if err := h.DB.Select(&totals, query, course.ID); err != nil {
-			c.Logger().Error(err)
-			return c.NoContent(http.StatusInternalServerError)
-		}
+		if course.Status == StatusClosed {
 
-		courseResults = append(courseResults, CourseResult{
-			Name:             course.Name,
-			Code:             course.Code,
-			TotalScore:       myTotalScore,
-			TotalScoreTScore: tScoreInt(myTotalScore, totals),
-			TotalScoreAvg:    averageInt(totals, 0),
-			TotalScoreMax:    maxInt(totals, 0),
-			TotalScoreMin:    minInt(totals, 0),
-			ClassScores:      classScores,
-		})
+			var tScore float64
+			if course.TotalScoreStdDev == 0 {
+				tScore = 50
+			} else {
+				tScore = (float64(myTotalScore)-course.TotalScoreAvg)/course.TotalScoreStdDev*10 + 50
+			}
+
+			courseResults = append(courseResults, CourseResult{
+				Name:             course.Name,
+				Code:             course.Code,
+				TotalScore:       myTotalScore,
+				TotalScoreTScore: tScore,
+				TotalScoreAvg:    course.TotalScoreAvg,
+				TotalScoreMax:    course.TotalScoreMax,
+				TotalScoreMin:    course.TotalScoreMin,
+				ClassScores:      classScores,
+			})
+
+		} else {
+			// この科目を履修している学生のTotalScore一覧を取得
+			var totals []int
+			query := "SELECT IFNULL(SUM(`submissions`.`score`), 0) AS `total_score`" +
+				" FROM `users`" +
+				" JOIN `registrations` ON `users`.`id` = `registrations`.`user_id`" +
+				" JOIN `courses` ON `registrations`.`course_id` = `courses`.`id`" +
+				" LEFT JOIN `classes` ON `courses`.`id` = `classes`.`course_id`" +
+				" LEFT JOIN `submissions` ON `users`.`id` = `submissions`.`user_id` AND `submissions`.`class_id` = `classes`.`id`" +
+				" WHERE `courses`.`id` = ?" +
+				" GROUP BY `users`.`id`"
+			if err := h.DB.Select(&totals, query, course.ID); err != nil {
+				c.Logger().Error(err)
+				return c.NoContent(http.StatusInternalServerError)
+			}
+
+			courseResults = append(courseResults, CourseResult{
+				Name:             course.Name,
+				Code:             course.Code,
+				TotalScore:       myTotalScore,
+				TotalScoreTScore: tScoreInt(myTotalScore, totals),
+				TotalScoreAvg:    averageInt(totals, 0),
+				TotalScoreMax:    maxInt(totals, 0),
+				TotalScoreMin:    minInt(totals, 0),
+				ClassScores:      classScores,
+			})
+
+		}
 
 		// 自分のGPA計算
 		if course.Status == StatusClosed {
@@ -1037,6 +1065,30 @@ func (h *handlers) SetCourseStatus(c echo.Context) error {
 				c.Logger().Error(err)
 				return c.NoContent(http.StatusInternalServerError)
 			}
+		}
+
+		//
+
+		totals := []int{}
+		for _, target := range targets {
+			totals = append(totals, target.TotalScore)
+		}
+
+		totalScoreMax := maxInt(totals, 0)
+		totalScoreMin := minInt(totals, 0)
+		totalScoreAvg := averageInt(totals, 0)
+		totalScoreStdDev := stdDevInt(totals, totalScoreAvg)
+
+		if _, err := tx.Exec(
+			"UPDATE `courses` SET `total_score_max` = ?, `total_score_min` = ?, `total_score_avg` = ?, `total_score_std_dev` = ? WHERE `id` = ?",
+			totalScoreMax,
+			totalScoreMin,
+			totalScoreAvg,
+			totalScoreStdDev,
+			courseID,
+		); err != nil {
+			c.Logger().Error(err)
+			return c.NoContent(http.StatusInternalServerError)
 		}
 	}
 

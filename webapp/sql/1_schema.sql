@@ -31,6 +31,10 @@ CREATE TABLE `courses`
     `teacher_id`  CHAR(26)                                                      NOT NULL,
     `keywords`    TEXT                                                          NOT NULL,
     `status`      ENUM ('registration', 'in-progress', 'closed')                NOT NULL DEFAULT 'registration',
+    total_score_max INT NOT NULL DEFAULT 0,
+    total_score_min INT NOT NULL DEFAULT 0,
+    total_score_avg DOUBLE NOT NULL DEFAULT 0,
+    total_score_std_dev DOUBLE NOT NULL DEFAULT 0,
     CONSTRAINT FK_courses_teacher_id FOREIGN KEY (`teacher_id`) REFERENCES `users` (`id`)
 );
 
