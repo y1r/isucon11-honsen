@@ -1394,11 +1394,6 @@ func (h *handlers) GetAnnouncementList(c echo.Context) error {
 		c.Logger().Error(err)
 		return c.NoContent(http.StatusInternalServerError)
 	}
-	fmt.Printf("aaa %d %s %v\n", readCount, userID, err)
-	if err != nil {
-		c.Logger().Error(err)
-		return c.NoContent(http.StatusInternalServerError)
-	}
 
 	if err := tx.Commit(); err != nil {
 		c.Logger().Error(err)
