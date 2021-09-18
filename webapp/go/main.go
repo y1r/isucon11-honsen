@@ -114,6 +114,26 @@ func (h *handlers) Initialize(c echo.Context) error {
 		}
 	}
 
+	// gpaの初期値計算
+	var users []User
+	query := "SELECT `users`.* FROM `users`"
+	if err := h.DB.Select(&users, query); err != nil {
+		c.Logger().Error(err)
+		return c.NoContent(http.StatusInternalServerError)
+	}
+	for _, user := range users {
+		// サンプルSQLでは、履修者がいる講義でクローズされたものがないため、すべて0で初期化でOK
+		query = `
+			INSERT INTO gpas(user_id, credits, total_scores) VALUES(
+				?, ?, ?
+			)
+		`
+		if _, err := h.DB.Exec(query, user.ID, 0, 0); err != nil {
+			c.Logger().Error(err)
+			return c.NoContent(http.StatusInternalServerError)
+		}
+	}
+
 	if err := exec.Command("rm", "-rf", AssignmentsDirectory).Run(); err != nil {
 		c.Logger().Error(err)
 		return c.NoContent(http.StatusInternalServerError)
@@ -932,6 +952,67 @@ func (h *handlers) SetCourseStatus(c echo.Context) error {
 	if _, err := tx.Exec("UPDATE `courses` SET `status` = ? WHERE `id` = ?", req.Status, courseID); err != nil {
 		c.Logger().Error(err)
 		return c.NoContent(http.StatusInternalServerError)
+	}
+
+	if req.Status == StatusClosed {
+		// TODO: N+1をやめたい
+
+		// query := `
+		// 	UPDATE gpas SET
+		// 		credits = credits + 1
+		// 		total_scores = total_scores + (
+		// 			/* TODO */
+		// 		)
+		// 	FROM
+		// 		gpas
+		// 		INNER JOIN registrations
+		// 		ON registrations.user_id = gpas.user_id
+		// 	WHERE
+		// 		registrations.course_id = ?
+		// `
+		// if _, err := tx.Exec(query, courseID); err != nil {
+		// 	c.Logger().Error(err)
+		// 	return c.NoContent(http.StatusInternalServerError)
+		// }
+
+		type UserWithScore struct {
+			User
+			TotalScore int `db:"total_score"`
+		}
+
+		var targets []UserWithScore
+		query := `
+			SELECT
+				users.*,
+				SUM(submissions.score) AS total_score
+			FROM users
+			INNER JOIN registrations
+				ON registrations.user_id = users.id
+				AND registrations.course_id = ?
+			INNER JOIN classes
+				ON classes.course_id = registrations.course_id
+			INNER JOIN submissions
+				ON submissions.class_id = classes.id
+				AND submissions.user_id = users.id
+			GROUP BY users.id
+		`
+		if err := h.DB.Select(&targets, query); err != nil {
+			c.Logger().Error(err)
+			return c.NoContent(http.StatusInternalServerError)
+		}
+		for _, target := range targets {
+			query = `
+				UPDATE gpas SET
+					credits = credits + 1,
+					total_score = total_score + ?
+				WHERE
+					user_id = ?
+			`
+			if _, err = h.DB.Exec(query, target.TotalScore, target.User.ID); err != nil {
+				c.Logger().Error(err)
+				return c.NoContent(http.StatusInternalServerError)
+			}
+		}
 	}
 
 	if err := tx.Commit(); err != nil {

@@ -5,6 +5,7 @@ DROP TABLE IF EXISTS `submissions`;
 DROP TABLE IF EXISTS `classes`;
 DROP TABLE IF EXISTS `registrations`;
 DROP TABLE IF EXISTS `courses`;
+DROP TABLE IF EXISTS `gpas`
 DROP TABLE IF EXISTS `users`;
 
 -- master data
@@ -83,3 +84,12 @@ CREATE TABLE `unread_announcements`
     CONSTRAINT FK_unread_announcements_announcement_id FOREIGN KEY (`announcement_id`) REFERENCES `announcements` (`id`),
     CONSTRAINT FK_unread_announcements_user_id FOREIGN KEY (`user_id`) REFERENCES `users` (`id`)
 );
+
+CREATE TABLE `gpas`
+(
+    `user_id` CHAR(26) PRIMARY KEY,
+    `credits` INT NOT NULL, -- 総獲得単位数
+    `total_score` INT NOT NULL,
+    `gpa` FLOAT AS (total_score / 100.0 / credits) STORED,
+    CONSTRAINT FK_gpas_user_id FOREIGN KEY (`user_id`) REFERENCES `users` (`id`)
+)
